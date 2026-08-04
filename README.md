@@ -1,18 +1,90 @@
 # 曲无双（Music Musou）
 
-Pygame 横屏音游割草原型：节拍判定、多主角模板、Android 触控（虚拟摇杆 + 技能按钮）。
+> **本仓库是玩法与技术验证用的 Demo / 原型**，不是成品发行版。节奏、曲目、关卡与数值仍在迭代；文档中的完整设计见 `CONTEXT.md`、`content.md` 与 `docs/adr/`。
 
-## 运行
+俯视角 **音游 × 割草无双**：一首歌驱动一整局节奏，走位清怪、卡拍强化攻击与充能，攒满释放大招。当前实现为 **Pygame 像素原型**，并包含 **Android 横屏 + 触控** 的打包与快速迭代流程。
+
+---
+
+## 这是什么 Demo？
+
+| 已有 | 尚未 / 简化 |
+|------|----------------|
+| 训练场 + 实战割草、胜负判定 | 完整关卡编辑器、多 Stage 流程 |
+| 三主角模板（圆斩 / 半圆锁敌 / 子弹 + 分身） | 曲目加点界面、星元存档等元进度 |
+| 与 BGM 联动的节拍条、宽窗 **两档判定**（卡拍 / 普通） | 全曲库与正式 UI |
+| 滑步、普攻、大招与卡拍联动 | 线上对战、完整剧情等 |
+
+适合用来体验 **「跟拍割草 + 换模板换歌」** 的核心手感，以及 Android 上的触控与性能优化路径。
+
+---
+
+## 游戏亮点（设计方向）
+
+### 1. 一首歌锁一局，换人不换歌
+
+- **Track（曲目）**：BGM、拍点表、这首歌的加点模板与大招类型；**一局 Run 只绑一首歌**，战斗中不换曲。
+- **Hero（主角模板）**：普攻形状、滑步、大招表现不同；**局中可换人，节拍与音乐时间轴不断**。
+
+### 2. 卡拍不是「必须」，而是「赚更多」
+
+- **Judgment Window（判定窗）**：拍子附近出手 = **卡拍**，窗外 = 普通攻击。
+- **只有两档**（没有繁琐的 Perfect/Good 梯度），窗口偏宽，跟拍友好。
+- 卡拍：**双倍伤害** + 大招充能每次 **×2**；没卡上也能打，只是收益低，不额外惩罚。
+
+### 3. 无双割草 + 节奏资源
+
+- 俯视角清屏，杂兵成潮；**滑步**位移、**普攻**清线、**大招**清场或强化窗口。
+- **Rhythm Energy**：打中敌人充能（受单次攻击的 **Energy Hit Cap** 限制）；满充能放 **Ultimate**。
+- 杂兵设计基准：不卡拍约 **两刀**、卡拍 **一刀**（在基准 HP/伤害下）；Boss 为血条池，卡拍仍是双倍伤害。
+
+### 4. 三主角模板，一首歌多种打法
+
+| 模板 | 体验侧重 |
+|------|----------|
+| **1** | 圆形范围普攻 + 范围型大招 |
+| **2** | 半圆锁敌方向 + 短时 **强化 Buff** 大招 |
+| **3** | 锁敌子弹、滑步强化弹；大招 **召唤分身**（嘲讽 + 协同输出） |
+
+切换模板会切换 **BGM 曲目变体**（Demo 内为程序化 Loop，BPM 联动），便于感受「同曲不同角色」的节奏。
+
+### 5. 移动端横屏 Demo
+
+- 逻辑分辨率横屏（`pygame.SCALED`），虚拟摇杆 + **普攻 / 滑步 / 大招** 叠加布局。
+- 支持 `buildozer` 打 APK；亦可用 `buildctx/repackage_apk.py` **热替换** `private.tar` 内 `.pyc`，便于不整包重编译时调试。
+
+---
+
+## 本地运行
 
 ```bash
 pip install pygame
-python main.py --touch
+python main.py --touch          # 手机式触控布局（推荐 Android 同源逻辑）
+python main.py                  # 桌面键鼠
+python main.py --skip-tutorial  # 跳过训练场
 ```
 
-## Android
+训练场按 **T**（或触控 **T**）进入实战；模板 **1 / 2 / 3**，**M** 静音。
 
-见 `buildozer.spec` 与 `buildctx/repackage_apk.py`（快速替换 `private.tar` 内 `.pyc` 并签名安装）。
+---
 
-## 仓库
+## Android 构建与快速补丁
 
-GitHub: `git@github.com:JerryZ107/music-musou.git`
+- 完整构建：见 `buildozer.spec`（landscape、`python3` + `pygame`）。
+- 已安装 APK 上替换 Python 逻辑：编译 `.pyc` → `buildctx/repackage_apk.py` → 签名 → `adb install`。
+
+---
+
+## 文档与仓库
+
+- 术语与领域模型：[`CONTEXT.md`](CONTEXT.md)
+- 设计大纲：[`content.md`](content.md)
+- 架构决策：[`docs/adr/`](docs/adr/)
+
+**GitHub：** [github.com/JerryZ107/music-musou](https://github.com/JerryZ107/music-musou)
+
+---
+
+## 许可与说明
+
+Demo 资源含开源字体（如 Noto Sans SC）与自生成/程序化 BGM。商用与发行前请自行核对素材与依赖许可证。
