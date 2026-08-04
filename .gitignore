@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Android / build artifacts (large, reproducible)
+bin/*.apk
+buildctx/pyc/
+buildctx/signed/
+buildctx/*.apk
+buildctx/installed.apk
+buildctx/logcat*.txt
+buildctx/*.log
+buildctx/*.png
+.cython/
+
+# Local SDK bundle (download separately)
+platform-tools/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Env / secrets
+.env
+*.keystore
+credentials.json
