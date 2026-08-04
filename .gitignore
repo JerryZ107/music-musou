@@ -36,3 +36,8 @@ Desktop.ini
 .env
 *.keystore
 credentials.json
+
+# Personal documents (never commit)
+*.docx
+~$*
+*简历*
