@@ -1,6 +1,6 @@
-# Music Musou (Pygame)
+# 曲无双（Music Musou）
 
-横屏音游割草原型：节拍判定、多主角模板、Android 触控（虚拟摇杆 + 技能按钮）。
+Pygame 横屏音游割草原型：节拍判定、多主角模板、Android 触控（虚拟摇杆 + 技能按钮）。
 
 ## 运行
 
@@ -15,4 +15,4 @@ python main.py --touch
 
 ## 仓库
 
-GitHub: `git@github.com:JerryZ107/musicgame.git`
+GitHub: `git@github.com:JerryZ107/music-musou.git`

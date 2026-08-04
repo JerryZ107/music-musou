@@ -26,6 +26,7 @@ buildctx/*.png
 
 # Local SDK bundle (download separately)
 platform-tools/
+bin/gh/
 
 # OS
 Thumbs.db
