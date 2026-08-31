@@ -4,9 +4,9 @@
 
 ## 1. 电梯陈述
 
-玩家在俯视角（或 2.5D）场景中 **清屏割草**。一次 **Run** 绑定 **一首 Track**（BGM + Beat Map）；**Stage** 可提供 **多个 Hero**（不同机制），Run 内可换 Hero **但不换 Track**（ADR 0010）。Run 使用 **Loadout**（**Track** + **Point Allocation**）；**Track Allocation Screen** 随时可改点、**Allocation Reset**，不限 Run 前。每首 Track 有独立的 **Allocation Template**（**Allocation Axis**、Base、**Allocation Point Cap**）；玩家在 Cap 内 **自由 x/y 分配**，**不必分满**；支持 **Allocation Reset**。全局共用 **Attack Template** 与少量 **Ultimate Archetype**；Track 间差异来自 **模板轴/Base/Cap/Archetype**，同曲差异来自 **加点比例**。**Beat-On Hit** 造成 **2× 伤害** 且每 Grant **2×** 充能（相对 Basic）。**Minion** 基准：不卡拍 **两刀**、卡拍 **一刀**；**Boss** 为 **Health Pool**。
+玩家在俯视角（或 2.5D）场景中 **清屏割草**。一次 **Run** 绑定 **一首 Track**（BGM + Beat Map）；**单角色一条命**，Run 内可切换 **多种武器**（不同攻击模组）**但不换 Track**（ADR 0010 / 0011）。Run 使用 **Loadout**（**Track** + **Point Allocation**）；**Track Allocation Screen** 随时可改点、**Allocation Reset**，不限 Run 前。每首 Track 有独立的 **Allocation Template**（**Allocation Axis**、Base、**Allocation Point Cap**）；玩家在 Cap 内 **自由 x/y 分配**，**不必分满**；支持 **Allocation Reset**。全局共用 **Attack Template** 与少量 **Ultimate Archetype**；Track 间差异来自 **模板轴/Base/Cap/Archetype**，同曲差异来自 **加点比例**。**Beat-On Hit** 造成 **2× 伤害** 且每 Grant **2×** 充能（相对 Basic）。**Minion** 基准：不卡拍 **两刀**、卡拍 **一刀**；**Boss** 为 **Health Pool**。
 
-**体验目标**：无双爽感 + 卡拍充能 + **换曲换模板/大招** + **同曲自由 x/y 加点**。
+**体验目标**：无双爽感 + 卡拍充能 + **换曲换武器模组/大招** + **同曲自由 x/y 加点**。
 
 ## 2. 文档地图
 
@@ -62,8 +62,8 @@ flowchart LR
 | **Stage** | 提供敌群与胜利条件的 playable 空间 |
 | **Attack Template** | 全 Track 共用的普攻骨架 |
 | **Track** | 一曲：Beat Map + Allocation Template + Ultimate Archetype |
-| **Hero** | 可玩角色；Protagonist Template 机制套件；与 Track 解耦 |
-| **Stage Audio Binding** | Run 内唯一 BGM 时间轴 + Beat Map；全 Hero 共用 |
+| **武器（Attack Module）** | 攻击模组（普攻形状、滑步、大招表现）；单角色一条命携带，Run 内可切换；与 Track 解耦 |
+| **Stage Audio Binding** | Run 内唯一 BGM 时间轴 + Beat Map；全武器共用 |
 | **Allocation Template** | 每曲轴、Base、Cap |
 | **Allocation Axis** | 如攻击范围、Energy Hit Cap |
 | **Allocation Point Cap** | 该曲可分配点数总和上限 |
@@ -86,7 +86,7 @@ flowchart LR
 ### 4.2 关系（ cardinality 草案）
 
 - 一次 **Run** 恰好绑定 **1 Track**、**1 Stage**（Demo 可固定 Stage）；Run 内 **不可换 Track**（换曲 = 新 Run）。
-- **Stage** 可配置 **allowed_heroes**；Run 内 **Hero Switch** 保持同一 **Stage Audio Binding**（ADR 0010）。
+- **Stage** 可配置 **allowed_weapons**；Run 内 **Weapon Switch** 保持同一 **Stage Audio Binding**（ADR 0010 / 0011）。
 - **Track** 拥有 **1 Allocation Template**、**1 Beat Map**、**1 Ultimate Archetype**（G8：**1 曲 1 模板**）。
 - **Loadout** 随 **Track Allocation Screen** 保存的 **Point Allocation** 更新；**G9：无 Run 前独占窗口**，Run 中亦可打开界面改点 + Reset。
 - **Energy Hit Cap** = Template 中 Cap 轴 Base + 分配到 Cap 轴的点数（换算见内容配置）。
@@ -120,8 +120,8 @@ Cap=3 时只计 3 个 Grant；Cap=5 的 Track 可计满 5 个。预期：范围 
 **场景 G — 同曲不同加点**  
 同一 Track、**Allocation Point Cap**=10：分配 7 范围 / 3 Cap vs 3 / 7。预期：一刀覆盖 vs 攒能速度 **可感知权衡**。
 
-**场景 B — 换 Hero 同关（或换 Track 的对比关）**  
-同一 **Stage**、同一 **Track**：Hero A（攻速向机制）vs Hero B（范围 + Cap 向机制）。预期：**机制与大招形态** 不同，**BGM 与拍子不变**。若对比不同 Track，应通过 **两次 Run** 而非 Run 内切歌。
+**场景 B — 换武器同关（或换 Track 的对比关）**  
+同一 **Stage**、同一 **Track**：武器 A（攻速向模组）vs 武器 B（范围 + Cap 向模组）。预期：**机制与大招形态** 不同，**BGM 与拍子不变**。若对比不同 Track，应通过 **两次 Run** 而非 Run 内切歌。
 
 **场景 C — 窗口边缘**  
 输入落在 Window 边界外 1 帧。预期：判定一致、可学习；无「随机暴击」感。
@@ -222,9 +222,9 @@ Ultimate Archetype + 固定参数:
 
 ## 7. Demo 切片（MVP）
 
-### 7.1 像素原型（Protagonist Template v0）
+### 7.1 像素原型（Attack Module v0）
 
-与 **Track** 解耦的 **基础主角模板**，先用固定规格跑通「拍子 2× + 蓄大 + 清屏结束」；后续再挂 **Allocation Template** / 多 **Track**。
+与 **Track** 解耦的 **基础武器模组**（Demo 以 1/2/3 模板实现，对应三把武器），先用固定规格跑通「拍子 2× + 蓄大 + 清屏结束」；后续再挂 **Allocation Template** / 多 **Track**。
 
 | 元素 | 规格 |
 |------|------|
@@ -235,7 +235,7 @@ Ultimate Archetype + 固定参数:
 | **Boss ×1** | **3×3 = 9 格** 橙色像素；**Health Pool = 12** |
 | **Run 结束** | **主角 HP=0** → 失败；**怪物死光** → 胜利（画面暂停，**R** 重开，非崩溃） |
 
-实现入口：`demo/prototype.py`；程序生成美术见 `demo/visuals.py`（地面贴图、史莱姆怪、主角精灵、攻击/HUD）。见 `requirements.txt`。
+实现入口：`web/`（React + Vite + PixiJS）。Pygame 像素原型已迁至 `music-musou-pygame`。
 
 ### 7.2 后续 MVP（内容向）
 
@@ -243,7 +243,7 @@ Ultimate Archetype + 固定参数:
 
 | 包含 | 不包含 |
 |------|--------|
-| 1 Stage、持续 Horde | 多角色、装备、Roguelike meta |
+| 1 Stage、持续 Horde | 多 Stage、装备、Roguelike meta |
 | 2 Tracks + 各 1 Template + 2 Archetype | 实时 BPM 分析、多 Stage |
 | 拍点 UI + **BGM 循环**（`demo/assets/demo_loop.wav`） | 在线排行、DLC |
 | Point Allocation + Reset（Cap 10 双轴 Demo） | 完整 Cap 成长、星元 meta |
@@ -302,3 +302,4 @@ Ultimate Archetype + 固定参数:
 | 2026-07-30 | 初稿：大纲 + 领域框架 + Grill 队列 |
 | 2026-07-30 | G4 + §7.1 像素 Prototype Template |
 | 2026-07-30 | G3b：Ultimate Archetype 混合；Track Module Kit；星元与 Preference Allocation |
+| 2026-08-07 | Hero 模板 → 武器模组；单角色一条命 + 多武器切换 + 广告复活（ADR 0011） |

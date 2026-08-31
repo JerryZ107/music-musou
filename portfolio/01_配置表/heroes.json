@@ -1,0 +1,99 @@
+{
+    "player_common":  {
+                          "hp":  5,
+                          "move_speed":  5.5,
+                          "action_cooldown_ms":  340,
+                          "slide_distance":  3,
+                          "slide_duration_ms":  110,
+                          "contact_damage":  1,
+                          "contact_iframe_ms":  500,
+                          "energy_max":  10,
+                          "beat_on_damage_mult":  2,
+                          "beat_on_energy_mult":  2
+                      },
+    "heroes":  [
+                   {
+                       "id":  1,
+                       "name":  "铁铠武士",
+                       "attack_shape":  "circle",
+                       "attack_range":  1.733,
+                       "attack_damage":  1,
+                       "ultimate":  "被动·铁壁：开局1护盾，每2秒+1（上限1）；大招·疾风：下次滑步+0.5格，卡拍滑步斩3伤",
+                       "ult_type":  "passive"
+                   },
+                   {
+                       "id":  2,
+                       "name":  "青衫枪客",
+                       "attack_shape":  "arc130",
+                       "attack_range":  3.6,
+                       "attack_damage":  1,
+                       "ultimate":  "穿云：7次穿透戳击，范围×1.5，伤害+1",
+                       "ult_type":  "active",
+                       "ult_charges":  7,
+                       "ult_range_mult":  1.5,
+                       "ult_damage_bonus":  1
+                   },
+                   {
+                       "id":  3,
+                       "name":  "灵耳弓使",
+                       "attack_shape":  "projectile",
+                       "attack_range":  10.667,
+                       "attack_damage":  1,
+                       "damage_factor":  0.5,
+                       "bullet_speed":  11,
+                       "lock_range":  18,
+                       "ultimate":  "分影：召唤1个分身嘲讽并协同射箭",
+                       "ult_type":  "active",
+                       "clone_hp":  1,
+                       "clone_radius":  0.26,
+                       "explosion_radius":  1.35,
+                       "explosion_damage":  2
+                   }
+               ],
+    "enemies":  [
+                    {
+                        "kind":  "minion",
+                        "hp":  2,
+                        "speed":  1.8,
+                        "radius":  0.4,
+                        "contact_damage":  1,
+                        "attack_range":  0.82,
+                        "windup_ms":  430,
+                        "strike_ms":  150,
+                        "lunge_speed":  7.5,
+                        "cooldown_ms":  1100
+                    },
+                    {
+                        "kind":  "boss",
+                        "hp":  24,
+                        "speed":  1.8,
+                        "radius":  0.78,
+                        "contact_damage":  1,
+                        "ranged_attack_range":  3.2,
+                        "lunge_attack_range":  3.6,
+                        "lunge_damage":  2,
+                        "lunge_cooldown_ms":  1000,
+                        "windup_ms":  720,
+                        "strike_ms":  180,
+                        "attack_radius":  1.75,
+                        "lunge_telegraph_radius":  0.85,
+                        "cooldown_ms":  1500
+                    },
+                    {
+                        "kind":  "megaboss",
+                        "hp":  48,
+                        "speed":  1.8,
+                        "radius":  1.05,
+                        "contact_damage":  1,
+                        "ranged_attack_range":  3.6,
+                        "lunge_attack_range":  3.6,
+                        "lunge_damage":  2,
+                        "lunge_cooldown_ms":  1000,
+                        "windup_ms":  850,
+                        "strike_ms":  220,
+                        "attack_radius":  2.35,
+                        "lunge_telegraph_radius":  1.0,
+                        "cooldown_ms":  1800
+                    }
+                ]
+}

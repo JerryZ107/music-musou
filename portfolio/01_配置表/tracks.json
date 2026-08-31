@@ -1,0 +1,29 @@
+{
+    "judgment_window_ms":  300,
+    "default_audio_latency_ms":  60,
+    "energy_max":  10,
+    "tracks":  [
+                   {
+                       "id":  1,
+                       "name":  "电音战歌",
+                       "bpm":  120,
+                       "loop_ms":  16000,
+                       "beats":  32
+                   },
+                   {
+                       "id":  2,
+                       "name":  "欢乐颂",
+                       "bpm":  84,
+                       "loop_ms":  22857,
+                       "beats":  32,
+                       "note":  "旋律拍点人工编排"
+                   },
+                   {
+                       "id":  3,
+                       "name":  "激昂",
+                       "bpm":  140,
+                       "loop_ms":  13714,
+                       "beats":  32
+                   }
+               ]
+}

@@ -1,0 +1,64 @@
+{
+    "wave_total":  5,
+    "waves":  [
+                  {
+                      "wave":  1,
+                      "arena":  "西北焰院",
+                      "arena_center":  [
+                                           22,
+                                           18
+                                       ],
+                      "minions_inner":  22,
+                      "minions_outer":  7,
+                      "boss":  1,
+                      "megaboss":  0
+                  },
+                  {
+                      "wave":  2,
+                      "arena":  "东北霜院",
+                      "arena_center":  [
+                                           74,
+                                           18
+                                       ],
+                      "minions_inner":  24,
+                      "minions_outer":  8,
+                      "boss":  1,
+                      "megaboss":  0
+                  },
+                  {
+                      "wave":  3,
+                      "arena":  "西南蛊院",
+                      "arena_center":  [
+                                           22,
+                                           54
+                                       ],
+                      "minions_inner":  28,
+                      "minions_outer":  9,
+                      "boss":  1,
+                      "megaboss":  0
+                  },
+                  {
+                      "wave":  4,
+                      "arena":  "东南金院",
+                      "arena_center":  [
+                                           74,
+                                           54
+                                       ],
+                      "minions_inner":  32,
+                      "minions_outer":  10,
+                      "boss":  1,
+                      "megaboss":  0
+                  },
+                  {
+                      "wave":  5,
+                      "arena":  "中央广场",
+                      "arena_center":  [
+                                           48,
+                                           36
+                                       ],
+                      "minions":  38,
+                      "boss":  0,
+                      "megaboss":  1
+                  }
+              ]
+}

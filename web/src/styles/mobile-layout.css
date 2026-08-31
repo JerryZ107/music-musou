@@ -1,0 +1,363 @@
+/* 曲无双 · 触屏 / 横屏统一适配（由 html[data-*] 驱动） */
+
+:root {
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --joy-size: 148px;
+  --joy-knob: 56px;
+  --act-main: 78px;
+  --act-sub: 62px;
+  --touch-bar-h: 44px;
+  --touch-hud-h: 48px;
+}
+
+html[data-touch="1"][data-phase="menu"] .app-menu {
+  padding-bottom: max(72px, calc(var(--safe-b) + 56px));
+}
+
+html[data-touch="1"][data-phase="menu"] .screen h1 {
+  font-size: clamp(18px, 4.5vw, 24px);
+}
+
+html[data-touch="1"][data-phase="menu"] .lede {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+html[data-touch="1"][data-orient="portrait"] .cards {
+  grid-template-columns: 1fr;
+}
+
+html[data-touch="1"][data-orient="landscape"] .app-menu .screen {
+  padding: 8px max(12px, var(--safe-r)) 16px max(12px, var(--safe-l));
+  gap: 8px;
+}
+
+html[data-touch="1"][data-orient="landscape"] .app-menu .cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+html[data-touch="1"][data-orient="landscape"] .app-menu .card {
+  min-height: 68px;
+  padding: 8px 10px;
+}
+
+html[data-touch="1"][data-orient="landscape"] .app-menu .card h3 {
+  font-size: 14px;
+}
+
+html[data-touch="1"][data-orient="landscape"] .app-menu .card p {
+  font-size: 10px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+html[data-touch="1"] .select-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-touch="1"] .select-scroll .card {
+  flex: 0 0 min(220px, 72vw);
+  scroll-snap-align: start;
+  min-height: 88px;
+}
+
+html[data-touch="1"][data-orient="landscape"] .select-scroll .card {
+  flex-basis: min(180px, 28vw);
+  min-height: 72px;
+}
+
+html[data-touch="1"] .screen-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  padding: 10px max(12px, var(--safe-r)) max(10px, var(--safe-b)) max(12px, var(--safe-l));
+  background: linear-gradient(180deg, transparent, #12180f 35%);
+}
+
+html[data-touch="1"] .screen-footer .primary {
+  width: 100%;
+  max-width: none;
+  min-height: 46px;
+}
+
+html[data-touch="1"] .landscape-bar {
+  padding: 8px max(12px, var(--safe-r)) 8px max(12px, var(--safe-l));
+}
+
+html[data-touch="1"] .landscape-chip {
+  z-index: 40;
+  bottom: max(12px, var(--safe-b));
+  right: max(12px, var(--safe-r));
+}
+
+html[data-touch="1"][data-phase="game"] {
+  --joy-size: clamp(256px, 52vmin, 440px);
+  --joy-knob: calc(var(--joy-size) * 0.38);
+  --act-main: clamp(116px, 26vmin, 152px);
+  --act-sub: clamp(96px, 22vmin, 124px);
+  --joy-inset-x: 18px;
+  --joy-inset-y: 6px;
+  --act-inset-x: 22px;
+  --act-inset-y: 6px;
+  --touch-bar-h: 38px;
+  --touch-hud-h: 46px;
+}
+
+html[data-touch="1"][data-phase="game"][data-short="1"] {
+  --joy-size: clamp(216px, 44vmin, 336px);
+  --act-main: clamp(104px, 24vmin, 128px);
+  --act-sub: clamp(88px, 20vmin, 108px);
+  --joy-inset-x: 14px;
+  --act-inset-x: 18px;
+  --touch-bar-h: 34px;
+  --touch-hud-h: 40px;
+}
+
+html[data-touch="1"][data-phase="game"] .game-root {
+  grid-template-rows: var(--touch-bar-h) 1fr var(--touch-hud-h);
+  height: 100%;
+  height: 100dvh;
+}
+
+html[data-touch="1"][data-phase="game"] .top-bar {
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 4px max(8px, var(--safe-r)) 4px max(8px, var(--safe-l));
+  padding-top: max(4px, var(--safe-t));
+  overflow-x: auto;
+  min-height: var(--touch-bar-h);
+}
+
+html[data-touch="1"][data-phase="game"] .top-bar strong {
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+html[data-touch="1"][data-phase="game"] .top-bar .ghost,
+html[data-touch="1"][data-phase="game"] .top-bar .primary {
+  padding: 6px 10px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+html[data-touch="1"][data-phase="game"] .top-bar-landscape {
+  margin-left: auto;
+  flex-shrink: 0;
+  border-color: rgba(126, 200, 255, 0.45);
+  color: #c8e8ff;
+}
+
+html[data-touch="1"][data-phase="game"] .bottom-hud {
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 4px max(6px, var(--safe-r)) max(4px, var(--safe-b)) max(6px, var(--safe-l));
+  min-height: var(--touch-hud-h);
+  overflow-x: auto;
+  align-items: center;
+}
+
+html[data-touch="1"][data-phase="game"] .bottom-hud .status-play {
+  display: none;
+}
+
+html[data-touch="1"][data-phase="game"] .bottom-hud .heart,
+html[data-touch="1"][data-phase="game"] .bottom-hud .pip {
+  width: 11px;
+  height: 11px;
+}
+
+html[data-touch="1"][data-phase="game"] .beat-bar {
+  width: min(120px, 26vw);
+  height: 12px;
+  flex-shrink: 0;
+}
+
+html[data-touch="1"][data-phase="game"] .combo-meter {
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+
+html[data-touch="1"][data-phase="game"] .combo-value {
+  font-size: 14px;
+}
+
+html[data-touch="1"][data-phase="game"] .boss-bar {
+  width: 72px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+html[data-touch="1"][data-phase="game"] .touch-result-bar {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+html[data-touch="1"][data-phase="game"] .touch-result-bar button {
+  padding: 6px 10px;
+  font-size: 12px;
+  min-height: 34px;
+}
+
+html[data-touch="1"][data-phase="game"] .joy-base {
+  width: var(--joy-size);
+  height: var(--joy-size);
+  min-width: 0;
+  min-height: 0;
+  background: rgba(16, 24, 36, 0.16);
+  border-color: rgba(100, 130, 170, 0.26);
+}
+
+html[data-touch="1"][data-phase="game"] .joy-knob {
+  width: var(--joy-knob);
+  height: var(--joy-knob);
+  background: radial-gradient(circle at 35% 30%, rgba(168, 220, 255, 0.42), rgba(90, 158, 200, 0.28));
+  border-color: rgba(240, 248, 255, 0.38);
+  box-shadow: none;
+}
+
+html[data-touch="1"][data-phase="game"] .touch-left {
+  left: max(calc(var(--safe-l) + var(--joy-inset-x)), var(--joy-inset-x));
+  bottom: max(calc(var(--joy-inset-y) + var(--safe-b)), var(--joy-inset-y));
+}
+
+html[data-touch="1"][data-phase="game"] .touch-right {
+  right: max(calc(var(--safe-r) + var(--act-inset-x)), var(--act-inset-x));
+  bottom: max(calc(var(--act-inset-y) + var(--safe-b)), var(--act-inset-y));
+}
+
+html[data-touch="1"][data-phase="game"] .touch-actions {
+  grid-template-columns: var(--act-sub) var(--act-main);
+  grid-template-rows: var(--act-sub) var(--act-main);
+  gap: 6px;
+}
+
+html[data-touch="1"][data-phase="game"] .act-btn.slide,
+html[data-touch="1"][data-phase="game"] .act-btn.ult {
+  width: var(--act-sub);
+  height: var(--act-sub);
+}
+
+html[data-touch="1"][data-phase="game"] .act-btn.attack {
+  width: var(--act-main);
+  height: var(--act-main);
+  background: linear-gradient(145deg, rgba(62, 207, 136, 0.5), rgba(26, 122, 72, 0.42));
+  border-color: rgba(126, 240, 176, 0.45);
+  box-shadow: none;
+}
+
+html[data-touch="1"][data-phase="game"] .act-btn.slide {
+  background: rgba(40, 56, 80, 0.32);
+  border-color: rgba(106, 128, 152, 0.4);
+}
+
+html[data-touch="1"][data-phase="game"] .act-btn.ult {
+  background: rgba(48, 40, 64, 0.34);
+  border-color: rgba(138, 120, 168, 0.4);
+}
+
+html[data-touch="1"][data-phase="game"] .act-btn.ult.ready {
+  background: linear-gradient(145deg, rgba(240, 216, 120, 0.68), rgba(200, 152, 48, 0.58));
+  border-color: rgba(255, 242, 168, 0.55);
+  box-shadow: 0 0 12px rgba(255, 210, 80, 0.22);
+}
+
+html[data-touch="1"][data-phase="game"] .act-icon {
+  font-size: clamp(22px, 5vmin, 32px);
+}
+
+html[data-touch="1"][data-phase="game"] .act-label {
+  font-size: clamp(10px, 2.2vmin, 13px);
+}
+
+html[data-touch="1"][data-phase="game"] .touch-hint {
+  opacity: 0.35;
+}
+
+html[data-touch="1"][data-phase="game"] .touch-weapons {
+  max-width: calc(var(--act-main) + var(--act-sub) + 20px);
+}
+
+html[data-touch="1"][data-phase="game"] .touch-chip {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+html[data-touch="1"] .overlay {
+  padding: max(12px, var(--safe-t)) max(12px, var(--safe-r)) max(12px, var(--safe-b))
+    max(12px, var(--safe-l));
+}
+
+html[data-touch="1"] .overlay.pause,
+html[data-touch="1"] .overlay.result {
+  z-index: 40;
+  pointer-events: auto;
+}
+
+html[data-touch="1"] .overlay.pause .overlay-actions,
+html[data-touch="1"] .overlay.pause .pause-resume {
+  pointer-events: auto;
+}
+
+html[data-touch="1"] .overlay.tutorial-scroll {
+  pointer-events: auto;
+  overflow-y: auto;
+  justify-content: flex-start;
+  align-items: stretch;
+}
+
+html[data-touch="1"] .overlay.tutorial-scroll .tutorial {
+  max-width: none;
+  font-size: 12px;
+  max-height: min(70vh, 320px);
+  overflow-y: auto;
+}
+
+html[data-touch="1"] .overlay.result h2 {
+  font-size: 22px;
+}
+
+html[data-touch="1"] .overlay.result .result-card {
+  padding: 10px 12px;
+  margin: 6px 0;
+}
+
+html[data-touch="1"] .overlay.result .result-score {
+  font-size: 18px;
+}
+
+html[data-touch="1"] .overlay.result .result-hint {
+  display: none;
+}
+
+html[data-touch="1"] .overlay.result .result-stats dd {
+  font-size: 14px;
+}
+
+html[data-touch="1"] .overlay.result .result-actions button {
+  min-height: 46px;
+  font-size: 14px;
+}
+
+html[data-touch="1"] .overlay.pause .overlay-actions button {
+  min-height: 46px;
+  min-width: 100px;
+}
+
+html[data-touch="1"][data-landscape-ready="0"][data-phase="game"] .touch-layer {
+  display: none;
+}
