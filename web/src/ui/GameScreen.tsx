@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { GameRuntime } from "../game/runtime";
-import type { HudSnapshot, RunResult, TrackId, WeaponId } from "../game/types";
+import type { HudSnapshot, RunResult, LevelId, TrackId, WeaponId } from "../game/types";
+import type { FirstClearGuideStep } from "../game/onboarding";
 import { copyShareText } from "../game/runResult";
+import { waitForPlayfieldLayout } from "../utils/waitForPlayfieldLayout";
 import { BottomHud, FieldOverlay, TopBar, type HudHandlers } from "./Hud";
 import { LandscapeModeToggle } from "./LandscapeModeToggle";
 import { ReviveAdModal } from "./ReviveAdModal";
 import { TouchControls } from "./TouchControls";
 
 export function GameScreen(props: {
+  levelId: LevelId;
   trackId: TrackId;
-  weaponIds: WeaponId[];
   weaponId: WeaponId;
   latencyMs: number;
   muted: boolean;
@@ -20,10 +22,14 @@ export function GameScreen(props: {
   onEnableLandscape: () => void;
   onDisableLandscape: () => void;
   tutorial: boolean;
+  runResultOverride?: RunResult | null;
+  firstClearGuideStep?: FirstClearGuideStep | null;
+  onGuideAdvance?: () => void;
   onExitSelect: () => void;
+  onNextLevel?: () => void;
+  onGoShop?: () => void;
   onLatencyChange: (ms: number) => void;
   onMuteChange: (muted: boolean) => void;
-  onWeaponChange: (id: WeaponId) => void;
   onOutcome: (r: RunResult) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -39,39 +45,59 @@ export function GameScreen(props: {
     const host = hostRef.current;
     if (!host) return;
     let cancelled = false;
-    const rt = new GameRuntime({
-      trackId: props.trackId,
-      weaponIds: props.weaponIds,
-      weaponId: props.weaponId,
-      audioLatencyMs: props.latencyMs,
-      muted: props.muted,
-      tutorial: props.tutorial,
-      touch: props.touch,
-    });
-    rt.onHud = setHud;
-    rt.onOutcome = props.onOutcome;
-    rtRef.current = rt;
-    setBooting(true);
-    void rt.mount(host).then(() => {
-      if (cancelled) rt.destroy();
-      else {
+    let resizeObserver: ResizeObserver | null = null;
+
+    const boot = async () => {
+      await waitForPlayfieldLayout(host, {
+        touch: props.touch,
+        portrait: props.portrait,
+      });
+      if (cancelled) return;
+
+      const rt = new GameRuntime({
+        levelId: props.levelId,
+        trackId: props.trackId,
+        weaponId: props.weaponId,
+        audioLatencyMs: props.latencyMs,
+        muted: props.muted,
+        tutorial: props.tutorial,
+        touch: props.touch,
+      });
+      rt.onHud = setHud;
+      rt.onOutcome = props.onOutcome;
+      rtRef.current = rt;
+      setBooting(true);
+
+      try {
+        await rt.mount(host);
+        if (cancelled) {
+          rt.destroy();
+          return;
+        }
+        rt.syncCanvasSize();
+        resizeObserver = new ResizeObserver(() => rt.syncCanvasSize());
+        resizeObserver.observe(host);
         setHud(rt.snapshot());
         setBooting(false);
+      } catch (err: unknown) {
+        console.error(err);
+        if (!cancelled) setBooting(false);
       }
-    }).catch((err: unknown) => {
-      console.error(err);
-      if (!cancelled) setBooting(false);
-    });
+    };
+
+    void boot();
     return () => {
       cancelled = true;
-      rt.destroy();
+      resizeObserver?.disconnect();
+      rtRef.current?.destroy();
       rtRef.current = null;
     };
     // 开局参数固定；延迟/静音通过 runtime 方法改。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.trackId, props.weaponIds.join(","), props.tutorial, props.touch]);
+  }, [props.levelId, props.trackId, props.weaponId, props.tutorial, props.touch, props.portrait]);
 
   useEffect(() => {
+    if (props.touch) return;
     const applyMove = () => {
       const k = keys.current;
       let x = 0;
@@ -105,18 +131,6 @@ export function GameScreen(props: {
       if (e.code === "Enter") rt.queueAttack();
       if (e.code === "ShiftLeft" || e.code === "ShiftRight") rt.queueSlide();
       if (e.code === "Space") rt.queueUlt();
-      if (e.code === "Digit1") {
-        rt.switchWeapon(1);
-        props.onWeaponChange(1);
-      }
-      if (e.code === "Digit2") {
-        rt.switchWeapon(2);
-        props.onWeaponChange(2);
-      }
-      if (e.code === "Digit3") {
-        rt.switchWeapon(3);
-        props.onWeaponChange(3);
-      }
       if (e.code === "KeyT") {
         if (rt.sim.run === "tutorial") rt.startCombat();
         else if (rt.sim.run === "win" || rt.sim.run === "lose") rt.restart(false);
@@ -143,7 +157,8 @@ export function GameScreen(props: {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [props]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.touch, props.onExitSelect, props.onLatencyChange, props.onMuteChange]);
 
   const hudProps: HudHandlers | null = hud
     ? {
@@ -154,10 +169,6 @@ export function GameScreen(props: {
         landscapeForced: props.landscapeForced,
         onEnableLandscape: props.onEnableLandscape,
         onDisableLandscape: props.onDisableLandscape,
-        onWeapon: (id) => {
-          rtRef.current?.switchWeapon(id);
-          props.onWeaponChange(id);
-        },
         onCombat: () => rtRef.current?.startCombat(),
         onRestart: () => {
           if (hud?.run === "lose" && hud.reviveAvailable) rtRef.current?.forfeitRevive();
@@ -167,9 +178,16 @@ export function GameScreen(props: {
           if (hud?.run === "lose" && hud.reviveAvailable) rtRef.current?.forfeitRevive();
           props.onExitSelect();
         },
+        onNextLevel: () => props.onNextLevel?.(),
+        onGoShop: () => props.onGoShop?.(),
+        firstClearGuideStep: props.firstClearGuideStep,
+        onGuideAdvance: props.onGuideAdvance,
         onMute: () => {
           const rt = rtRef.current;
-          if (rt) props.onMuteChange(rt.toggleMute());
+          if (rt) {
+            rt.ensureAudioPlaying();
+            props.onMuteChange(rt.toggleMute());
+          }
         },
         onLatency: (d) => {
           const rt = rtRef.current;
@@ -178,6 +196,7 @@ export function GameScreen(props: {
           props.onLatencyChange(rt.audio.latencyMs);
         },
         onPause: () => {
+          rtRef.current?.ensureAudioPlaying();
           rtRef.current?.togglePause();
         },
         onEnd: props.onExitSelect,
@@ -202,6 +221,7 @@ export function GameScreen(props: {
       ]
         .filter(Boolean)
         .join(" ")}
+      onPointerDown={() => rtRef.current?.ensureAudioPlaying()}
     >
       {props.touch && props.portrait && !props.landscapeReady && (
         <LandscapeModeToggle
@@ -225,13 +245,19 @@ export function GameScreen(props: {
           <FieldOverlay
             hud={hud}
             touch={props.touch}
+            runResultOverride={props.runResultOverride}
+            firstClearGuideStep={props.firstClearGuideStep}
+            onGuideAdvance={props.onGuideAdvance}
             onPause={hudProps.onPause}
             onEnd={hudProps.onEnd}
             onRestart={hudProps.onRestart}
             onReselect={hudProps.onReselect}
             onShare={hudProps.onShare}
+            onNextLevel={hudProps.onNextLevel}
+            onGoShop={props.onGoShop}
             onWatchReviveAd={() => setReviveAdOpen(true)}
             onForfeitRevive={() => rtRef.current?.forfeitRevive()}
+            onLatency={hudProps.onLatency}
             shareHint={shareHint}
           />
         )}
@@ -253,17 +279,11 @@ export function GameScreen(props: {
             ultReady={hud.ultReady}
             tutorial={hud.run === "tutorial"}
             gameOver={false}
-            allowed={hud.allowedWeapons}
-            weaponId={hud.weaponId}
             onMove={(x, y) => rtRef.current?.setMove(x, y)}
             onAttack={() => rtRef.current?.queueAttack()}
             onSlide={() => rtRef.current?.queueSlide()}
             onUlt={() => rtRef.current?.queueUlt()}
             onPause={() => rtRef.current?.togglePause()}
-            onWeapon={(id) => {
-              rtRef.current?.switchWeapon(id);
-              props.onWeaponChange(id);
-            }}
             onContext={() => {
               const rt = rtRef.current;
               if (!rt) return;

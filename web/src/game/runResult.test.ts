@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { createSim } from "./sim";
 import { computeRunResult, formatStars } from "./runResult";
 
-describe("结算与分享", () => {
-  it("胜利三星：高 HP + 连击 + 卡拍", () => {
-    const sim = createSim({ trackId: 1, weaponId: 1, allowedWeapons: [1], tutorial: false });
+const THREE_STARS = "\u2605\u2605\u2605";
+
+describe("run result scoring", () => {
+  it("win with 3 stars: high HP, combo, beat hits", () => {
+    const sim = createSim({ levelId: 1, trackId: 1, weaponId: 1, tutorial: false });
     sim.run = "win";
     sim.player.hp = 5;
     sim.stats.maxCombo = 12;
@@ -13,11 +15,11 @@ describe("结算与分享", () => {
     const r = computeRunResult(sim);
     expect(r.stars).toBe(3);
     expect(r.score).toBeGreaterThan(500);
-    expect(formatStars(r.stars)).toBe("★★★");
+    expect(formatStars(r.stars)).toBe(THREE_STARS);
   });
 
-  it("胜利一星：仅通关", () => {
-    const sim = createSim({ trackId: 1, weaponId: 1, allowedWeapons: [1], tutorial: false });
+  it("win with 1 star: clear only", () => {
+    const sim = createSim({ levelId: 1, trackId: 1, weaponId: 1, tutorial: false });
     sim.run = "win";
     sim.player.hp = 1;
     sim.stats.maxCombo = 2;
@@ -26,8 +28,8 @@ describe("结算与分享", () => {
     expect(r.stars).toBe(1);
   });
 
-  it("失败零星仍计分", () => {
-    const sim = createSim({ trackId: 1, weaponId: 1, allowedWeapons: [1], tutorial: false });
+  it("loss still scores damage and combo", () => {
+    const sim = createSim({ levelId: 1, trackId: 1, weaponId: 1, tutorial: false });
     sim.run = "lose";
     sim.stats.totalDamage = 40;
     sim.stats.maxCombo = 6;

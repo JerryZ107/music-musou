@@ -1,6 +1,4 @@
 import { useRef } from "react";
-import type { WeaponId } from "../game/types";
-import { HEROES } from "../game/tracks";
 
 const JOY_DEAD = 0.14;
 
@@ -16,13 +14,10 @@ export function TouchControls(props: {
   ultReady: boolean;
   tutorial: boolean;
   gameOver: boolean;
-  allowed: WeaponId[];
-  weaponId: WeaponId;
   onMove: (x: number, y: number) => void;
   onAttack: () => void;
   onSlide: () => void;
   onUlt: () => void;
-  onWeapon: (id: WeaponId) => void;
   onContext: () => void;
   onPause: () => void;
 }) {
@@ -112,16 +107,6 @@ export function TouchControls(props: {
 
       <div className="touch-right">
         <div className="touch-weapons">
-          {props.allowed.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className={id === props.weaponId ? "touch-chip primary" : "touch-chip"}
-              onPointerDown={tapButton(() => props.onWeapon(id))}
-            >
-              {HEROES[id].short}
-            </button>
-          ))}
           <button type="button" className="touch-chip" onPointerDown={tapButton(props.onContext)}>
             {contextLabel}
           </button>

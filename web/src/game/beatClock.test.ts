@@ -3,16 +3,16 @@ import { BeatGridClock, regularBeatGrid } from "./beatClock";
 import { TRACKS } from "./tracks";
 
 describe("BeatGridClock", () => {
-  it("120 BPM 电音战歌拍点处于亮区", () => {
+  it("首曲强拍时刻处于亮区", () => {
     const p = TRACKS[1];
     const clock = new BeatGridClock(p, 300, 0);
-    expect(clock.hudInZone(0)).toBe(true);
-    expect(clock.hudInZone(500)).toBe(true);
-    expect(clock.beatPhase01(250) > 0.4 && clock.beatPhase01(250) < 0.6).toBe(true);
-    expect(clock.hudInZone(250)).toBe(false);
+    const beat0 = p.beatTimesMs[0]!;
+    expect(clock.hudInZone(beat0)).toBe(true);
+    expect(clock.combatBeatZone(beat0)).toBe(true);
+    expect(p.beatTimesMs.length).toBeGreaterThan(8);
   });
 
-  it("欢乐颂拍点表非空且落在 loop 内", () => {
+  it("第二曲拍点落在 loop 内", () => {
     const p = TRACKS[2];
     expect(p.beatTimesMs.length).toBeGreaterThan(8);
     expect(p.beatTimesMs.every((t) => t >= 0 && t < p.loopMs)).toBe(true);
@@ -20,12 +20,43 @@ describe("BeatGridClock", () => {
     expect(clock.hudInZone(p.beatTimesMs[0]!)).toBe(true);
   });
 
+  it("拍点间隔中点不在金环亮区", () => {
+    const p = TRACKS[1];
+    const clock = new BeatGridClock(p, 300, 0);
+    const b0 = p.beatTimesMs[0]!;
+    const b1 = p.beatTimesMs[1]!;
+    const mid = (b0 + b1) / 2;
+    expect(clock.hudInZone(b0)).toBe(true);
+    expect(clock.hudInZone(mid)).toBe(false);
+  });
+
+  it("银环预警区：金环前 0.3s 可判强普但金环未亮", () => {
+    const { times, loopMs } = regularBeatGrid(120, 4, 4);
+    const clock = new BeatGridClock({ ...TRACKS[1], beatTimesMs: times, loopMs }, 300, 0);
+    const beat = times[1]!;
+    const silverAt = beat - 250;
+    expect(clock.hudInSilverZone(silverAt)).toBe(true);
+    expect(clock.hudInZone(silverAt)).toBe(false);
+    expect(clock.combatBeatZone(silverAt)).toBe(true);
+  });
+
+  it("强普区在金环结束后关闭", () => {
+    const { times, loopMs } = regularBeatGrid(60, 4, 4);
+    const clock = new BeatGridClock({ ...TRACKS[1], beatTimesMs: times, loopMs }, 300, 0);
+    const beat = times[0]!;
+    expect(clock.combatBeatZone(beat + 150)).toBe(true);
+    expect(clock.combatBeatZone(beat + 151)).toBe(false);
+  });
+
   it("beatSlotKey 在同一拍内稳定", () => {
     const clock = new BeatGridClock(TRACKS[1], 300, 0);
-    const a = clock.beatSlotKey(20);
-    const b = clock.beatSlotKey(80);
+    const beat1 = TRACKS[1].beatTimesMs[1] ?? TRACKS[1].beatTimesMs[0]!;
+    const a = clock.beatSlotKey(beat1 + 20);
+    const b = clock.beatSlotKey(beat1 + 80);
     expect(a).toBe(b);
-    expect(clock.beatSlotKey(clock.loopMs + 20)).not.toBe(a);
+    const silver = clock.beatSlotKey(beat1 - 250);
+    expect(silver).toBe(a);
+    expect(clock.beatSlotKey(clock.loopMs + beat1 + 20)).not.toBe(a);
   });
 
   it("regularBeatGrid 长度与 loop 对齐", () => {

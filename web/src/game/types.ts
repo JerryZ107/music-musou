@@ -1,6 +1,7 @@
 import { BOSS_RADIUS, MEGABOSS_RADIUS, MINION_RADIUS } from "./constants";
 
-export type TrackId = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type TrackId = 1 | 2 | 3;
+export type LevelId = 1 | 2;
 export type HeroId = 1 | 2 | 3;
 export type WeaponId = HeroId;
 export type RunState = "tutorial" | "playing" | "win" | "lose";
@@ -34,7 +35,13 @@ export interface RunResult {
   hpLeft: number;
   damageTaken: number;
   trackId: TrackId;
+  levelId: LevelId;
   weaponId: WeaponId;
+  goldEarned?: number;
+  trackUnlocked?: TrackId | null;
+  levelUnlocked?: LevelId | null;
+  shopUnlocked?: boolean;
+  promptShop?: boolean;
 }
 
 export interface Circle {
@@ -74,6 +81,14 @@ export interface Enemy extends Circle {
   danmakuFired?: boolean;
   /** 突刺窗口内是否已结算伤害（Boss 突刺 2 点）。 */
   lungeHit?: boolean;
+  /** 本次突刺应位移距离（与读条终点一致）。 */
+  lungeDist?: number;
+  lungeTraveled?: number;
+  lungeSpeed?: number;
+  lungeFromX?: number;
+  lungeFromY?: number;
+  lungeToX?: number;
+  lungeToY?: number;
 }
 
 export interface Bullet extends Circle {
@@ -115,6 +130,7 @@ export interface Clone extends Circle {
 }
 
 export interface AttackFlash {
+  startMs?: number;
   untilMs: number;
   x: number;
   y: number;
@@ -138,8 +154,8 @@ export interface Sim {
   nowMs: number;
   run: RunState;
   trackId: TrackId;
+  levelId: LevelId;
   weaponId: WeaponId;
-  allowedWeapons: WeaponId[];
   player: Player;
   enemies: Enemy[];
   pendingWaves: Enemy[][];
@@ -159,10 +175,10 @@ export interface Sim {
   slideFromY: number;
   slideToX: number;
   slideToY: number;
-  spearThrustCharges: number;
-  samuraiSlideCharges: number;
+  ultBuffUntilMs: number;
+  spearUltAttacksLeft: number;
+  spearAtkSpeedStacks: number;
   shieldHp: number;
-  lastShieldTickMs: number;
   explosions: ExplosionFx[];
   flash: AttackFlash | null;
   nextId: number;
@@ -173,7 +189,22 @@ export interface Sim {
   damagePopups: DamagePopup[];
   /** 本局是否还能看广告复活（每局一次）。 */
   reviveAvailable: boolean;
+  knockVX: number;
+  knockVY: number;
 }
+
+export type BeatCue = {
+  phase01: number;
+  /** 金环亮区 */
+  inZone: boolean;
+  /** 银环预警（金环前 0.3s） */
+  inSilverZone: boolean;
+  /** 强普判定区（银环起至金环结束） */
+  inCombatZone: boolean;
+  proximity: number;
+  windowFrac: number;
+  silverPreFrac: number;
+};
 
 export interface HudSnapshot {
   run: RunState;
@@ -182,8 +213,8 @@ export interface HudSnapshot {
   energy: number;
   energyMax: number;
   weaponId: WeaponId;
-  allowedWeapons: WeaponId[];
   trackId: TrackId;
+  levelId: LevelId;
   enemyCount: number;
   pendingCount: number;
   wave: number;
@@ -194,11 +225,16 @@ export interface HudSnapshot {
   nearestBossMax: number | null;
   beatPhase01: number;
   inZone: boolean;
+  inSilverZone: boolean;
+  inCombatZone: boolean;
   beatProximity: number;
   windowFrac: number;
+  silverPreFrac: number;
+  beatCount: number;
   ultReady: boolean;
-  spearThrustCharges: number;
-  samuraiSlideCharges: number;
+  ultBuffRemainingMs: number;
+  spearUltAttacksLeft: number;
+  spearAtkSpeedStacks: number;
   shieldHp: number;
   latencyMs: number;
   muted: boolean;

@@ -1,15 +1,12 @@
-# 可选：名曲录音（OGG / MP3 / WAV）
+# NCS 曲目录音
 
-将音频文件命名为 `track-1.ogg` … `track-7.ogg` 放在本目录，游戏会**优先播放录音**，找不到文件时使用内置旋律编配。
+| 文件 | 曲目 |
+|------|------|
+| shop-bgm.mp3 | This Feeling（Reece Rosé, STREETSINEZ · NCS）— 商店 BGM |
+| track-1.mp3 | Recall（gabriawll · NCS） |
+| track-2.mp3 | whatdoyousee（GlitchCat · prodBigMike · NCS） |
+| track-3.mp3 | I Still Hear Your Voice（johnny joined · Lynxie · NCS） |
 
-| 文件 | 对应曲目 |
-|------|----------|
-| track-1.ogg | （跳过）电音战歌为内置合成，不用放文件 |
-| track-2.ogg | 欢乐颂（贝多芬） |
-| track-3.ogg | 致爱丽丝（贝多芬） |
-| track-4.ogg | 土耳其进行曲（莫扎特） |
-| track-5.ogg | D 大调卡农（帕赫贝尔） |
-| track-6.ogg | 茉莉花 |
-| track-7.ogg | 克罗地亚狂想曲（Tonči Huljić · 可选高音质录音，默认内置原曲旋律） |
+拍点由 `web/scripts/analyze_beats.py` 从录音解析（`half` 模式：每 2 拍留 1 强拍节点）。
 
-请使用**公有领域录音**或**已获授权**的版本。节拍仍按 `tracks.ts` 中的 BPM 与拍点表对齐；录音长度建议与 loop 时长接近以便循环。
+请遵守 [NCS 使用规范](https://ncs.io/) 在发布内容时署名。

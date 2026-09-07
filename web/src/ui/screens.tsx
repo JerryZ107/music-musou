@@ -1,7 +1,23 @@
 import { useState } from "react";
+import { HERO_SELECT_ORDER } from "../game/meta";
 import { TRACKS, HEROES } from "../game/tracks";
-import type { AccountData, SlotData } from "../game/save";
-import type { TrackId, WeaponId } from "../game/types";
+import { LEVELS } from "../game/levels";
+import type { AccountMeta, AccountData, SlotData } from "../game/save";
+import type { LevelId, TrackId, WeaponId } from "../game/types";
+import { TRACK_CODEX } from "../game/codex";
+import type { FirstClearGuideStep } from "../game/onboarding";
+import { guideStepLabel, isFirstClearGuideActive } from "../game/onboarding";
+import { GuideSpotlight } from "./GuideSpotlight";
+import {
+  GameLogo,
+  HeroPortrait,
+  MenuHeader,
+  MenuPanel,
+  MenuScreen,
+  SectionTitle,
+} from "./MenuChrome";
+import { TRACK_VISUAL } from "./menuTheme";
+import { LEVEL_VISUAL } from "../game/levels";
 
 export function AccountGate(props: {
   accounts: AccountData[];
@@ -10,40 +26,41 @@ export function AccountGate(props: {
 }) {
   const [name, setName] = useState(props.lastName ?? "");
   return (
-    <div className="screen">
-      <h1>曲无双</h1>
-      <p className="lede">
-        一首 Track 锁一局。三个角色共用一条命，1/2/3 切换不停歌。武士旋斩、枪客半扫、弓使飞矢打中身体才算
-        Combat Hit。
-      </p>
-      <div className="row">
-        <input
-          type="text"
-          maxLength={16}
-          placeholder="账号名（仅本机）"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && name.trim()) props.onEnter(name.trim());
-          }}
-        />
-        <button className="primary" disabled={!name.trim()} onClick={() => props.onEnter(name.trim())}>
-          进入
-        </button>
-      </div>
+    <MenuScreen>
+      <GameLogo />
+      <MenuPanel className="account-panel">
+        <p className="lede">
+          注册即得第一关、Recall 与枪兵。手机竖屏可点「横屏」或出征自动切换；通关解锁新曲、关卡与商城。
+        </p>
+        <div className="row">
+          <input
+            type="text"
+            maxLength={16}
+            placeholder="输入武者名号"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && name.trim()) props.onEnter(name.trim());
+            }}
+          />
+          <button type="button" className="primary" disabled={!name.trim()} onClick={() => props.onEnter(name.trim())}>
+            踏入废园
+          </button>
+        </div>
+      </MenuPanel>
       {props.accounts.length > 0 && (
         <>
-          <p className="tag">已有账号</p>
-          <div className="row">
+          <SectionTitle icon="◈">已有名号</SectionTitle>
+          <div className="account-chips">
             {props.accounts.map((a) => (
-              <button key={a.name} onClick={() => props.onEnter(a.name)}>
+              <button type="button" key={a.name} className="account-chip" onClick={() => props.onEnter(a.name)}>
                 {a.name}
               </button>
             ))}
           </div>
         </>
       )}
-    </div>
+    </MenuScreen>
   );
 }
 
@@ -54,102 +71,263 @@ export function SlotPicker(props: {
   onClear: (index: number) => void;
 }) {
   return (
-    <div className="screen">
-      <div className="row">
-        <h1>存档槽 · {props.account.name}</h1>
-        <button className="ghost" onClick={props.onBack}>
-          换账号
-        </button>
-      </div>
-      <p className="lede">每个账号 3 个 Save Slot。槽里记下 Track / 角色偏好、延迟与战绩，不中途存一局战斗。</p>
+    <MenuScreen>
+      <MenuHeader
+        title={`存档 · ${props.account.name}`}
+        subtitle="每个空槽都是独立进度，互不影响"
+        actions={
+          <button type="button" className="ghost nav-btn" onClick={props.onBack}>
+            换名号
+          </button>
+        }
+      />
       <div className="cards">
         {props.account.slots.map((slot, i) => (
-          <button key={i} className="card" onClick={() => props.onPick(i, slot)}>
-            <div className="kicker">SLOT {i + 1}</div>
-            {slot ? (
-              <>
-                <h3>{TRACKS[slot.trackId].name}</h3>
-                <p>
-                  角色 {slot.weaponIds.map((id) => HEROES[id].short).join("/")} · {slot.stats.wins}胜 {slot.stats.losses}负 / {slot.stats.runs}局
-                </p>
-              </>
-            ) : (
-              <>
-                <h3>空槽</h3>
-                <p>新开 Loadout，从选曲开始。</p>
-              </>
-            )}
+          <button type="button"
+            key={i}
+            className={`card slot-card${slot ? "" : " slot-card--empty"}`}
+            onClick={() => props.onPick(i, slot)}
+          >
+            <div
+              className="card__banner"
+              style={{ background: slot ? LEVEL_VISUAL[slot.levelId].grad : "#1a2030" }}
+            />
+            <div className="card__inner">
+              <div className="kicker">存档槽 {i + 1}</div>
+              {slot ? (
+                <>
+                  <h3>
+                    {LEVELS[slot.levelId].short} · {TRACKS[slot.trackId].name}
+                  </h3>
+                  <p>{HEROES[slot.weaponId].short}</p>
+                  <div className="slot-card__stats">
+                    <span>
+                      <strong>{slot.stats.wins}</strong> 胜
+                    </span>
+                    <span>
+                      <strong>{slot.stats.losses}</strong> 负
+                    </span>
+                    <span>{slot.stats.runs} 局</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="slot-card__plus">+</div>
+                  <h3>空槽</h3>
+                  <p>全新进度 · 从第一关开始</p>
+                </>
+              )}
+            </div>
           </button>
         ))}
       </div>
       <div className="row">
         {props.account.slots.map((slot, i) =>
           slot ? (
-            <button key={i} className="ghost" onClick={() => props.onClear(i)}>
+            <button type="button" key={i} className="ghost nav-btn" onClick={() => props.onClear(i)}>
               清空槽 {i + 1}
             </button>
           ) : null,
         )}
       </div>
-    </div>
+    </MenuScreen>
   );
 }
 
 export function SelectScreen(props: {
+  levelId: LevelId;
   trackId: TrackId;
-  weaponIds: WeaponId[];
+  weaponId: WeaponId;
+  meta: AccountMeta;
+  shopPromptPending: boolean;
+  firstClearGuideStep?: FirstClearGuideStep | null;
+  onGuideAdvance?: () => void;
+  onGuideComplete?: () => void;
+  onLevel: (id: LevelId) => void;
   onTrack: (id: TrackId) => void;
-  onToggleWeapon: (id: WeaponId) => void;
+  onWeapon: (id: WeaponId) => void;
   onStart: () => void;
   onBack: () => void;
+  onOpenShop: () => void;
+  onOpenCodex: () => void;
 }) {
-  const canStart = props.weaponIds.length >= 1;
+  const levelLocked = !props.meta.unlockedLevels.includes(props.levelId);
+  const trackLocked = !props.meta.unlockedTracks.includes(props.trackId);
+  const heroLocked = !props.meta.unlockedHeroes.includes(props.weaponId);
+  const needArcher = props.levelId === 2 && !props.meta.unlockedHeroes.includes(3);
+  const canStart = !levelLocked && !trackLocked && !heroLocked && !needArcher;
+  const guideStep = props.firstClearGuideStep;
+  const guideActive = isFirstClearGuideActive(guideStep);
+
   return (
-    <div className="screen">
-      <div className="row">
-        <h1>选 Track 与角色</h1>
-        <button className="ghost" onClick={props.onBack}>
-          返回槽
+    <MenuScreen>
+      <MenuHeader
+        title="战前整备"
+        subtitle="关卡 · 曲目 · 武将（各选一）"
+        gold={props.meta.gold}
+        actions={
+          <>
+            <button type="button" className="ghost nav-btn" onClick={props.onOpenCodex}>
+              资料片
+            </button>
+            <button type="button"
+              className="ghost nav-btn"
+              disabled={!props.meta.shopUnlocked}
+              title={props.meta.shopUnlocked ? undefined : "通关第一关后解锁"}
+              data-guide="select-shop"
+              onClick={() => props.meta.shopUnlocked && props.onOpenShop()}
+            >
+              商城{props.meta.shopUnlocked ? "" : " 🔒"}
+            </button>
+            <button type="button" className="ghost nav-btn" onClick={props.onBack}>
+              返回
+            </button>
+          </>
+        }
+      />
+      {props.shopPromptPending && !props.meta.unlockedHeroes.includes(3) && !guideActive && (
+        <p className="shop-guide">
+          第一关已通关！商城已开启：用 10 金币招募弓使（武士 20 金币），再挑战第二关。
+        </p>
+      )}
+
+      <SectionTitle icon="⚑">关卡</SectionTitle>
+      <div className="cards select-scroll">
+        {([1, 2] as LevelId[]).map((id) => {
+          const locked = !props.meta.unlockedLevels.includes(id);
+          const lv = LEVELS[id];
+          const vis = LEVEL_VISUAL[id];
+          return (
+            <button type="button"
+              key={id}
+              data-guide={id === 2 ? "select-level-2" : undefined}
+              className={["card", id === props.levelId ? "selected" : "", locked ? "locked" : ""]
+                .filter(Boolean)
+                .join(" ")}
+              disabled={locked}
+              onClick={() => {
+                if (locked) return;
+                props.onLevel(id);
+                if (guideStep === "select_level2" && id === 2) props.onGuideComplete?.();
+              }}
+            >
+              <div className="card__banner" style={{ background: vis.grad }} />
+              <div className="card__inner">
+                <div className="kicker">{lv.waves}</div>
+                <h3>{lv.short}</h3>
+                <p>{lv.name}</p>
+                <p>{locked ? "🔒 未解锁" : lv.desc}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <SectionTitle icon="♪">曲目</SectionTitle>
+      <div className="cards select-scroll">
+        {(Object.values(TRACKS) as (typeof TRACKS)[TrackId][]).map((t) => {
+          const locked = !props.meta.unlockedTracks.includes(t.trackId);
+          const vis = TRACK_VISUAL[t.trackId];
+          return (
+            <button type="button"
+              key={t.trackId}
+              data-guide={t.trackId === 2 ? "select-track-2" : undefined}
+              className={["card", t.trackId === props.trackId ? "selected" : "", locked ? "locked" : ""]
+                .filter(Boolean)
+                .join(" ")}
+              disabled={locked}
+              onClick={() => {
+                if (locked) return;
+                props.onTrack(t.trackId);
+                if (guideStep === "select_track" && t.trackId === 2) props.onGuideAdvance?.();
+              }}
+            >
+              <div className="card__banner" style={{ background: vis.grad }} />
+              <div className="card__inner">
+                <div className="kicker">
+                  {vis.icon} {t.bpmLabel} BPM
+                </div>
+                <h3>{t.name}</h3>
+                <p>{TRACK_CODEX[t.trackId].artist}</p>
+                <p>{locked ? "🔒 未解锁" : `${t.beatTimesMs.length} 拍 · ${(t.loopMs / 1000).toFixed(1)}s`}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <SectionTitle icon="⚔">武将</SectionTitle>
+      <div className="cards select-scroll">
+        {HERO_SELECT_ORDER.map((heroId) => {
+          const hero = HEROES[heroId];
+          const owned = props.meta.unlockedHeroes.includes(hero.id);
+          const active = props.weaponId === hero.id;
+          return (
+            <button type="button"
+              key={hero.id}
+              data-guide={hero.id === 3 ? "select-archer-3" : undefined}
+              className={[active ? "selected" : "", owned ? "card" : "card locked"].filter(Boolean).join(" ")}
+              disabled={!owned}
+              onClick={() => {
+                if (!owned) return;
+                props.onWeapon(hero.id);
+                if (guideStep === "select_archer" && hero.id === 3) props.onGuideAdvance?.();
+              }}
+            >
+              <div
+                className="card__banner"
+                style={{ background: `linear-gradient(90deg, ${TRACK_VISUAL[1].accent}22, transparent)` }}
+              />
+              <div className="card__inner">
+                <div className="card__row">
+                  <HeroPortrait heroId={hero.id} size="sm" />
+                  <div className="card__body">
+                    <div className="kicker">武将 {hero.id}</div>
+                    <h3>{hero.name}</h3>
+                    <p>{hero.desc}</p>
+                  </div>
+                </div>
+                {!owned && <p className="lock-hint">商城招募</p>}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="menu-cta-footer">
+        {needArcher && <p className="shop-guide">第二关需要弓使 · 商城 10 金币</p>}
+        <button type="button" className="primary" disabled={!canStart} onClick={props.onStart}>
+          {canStart
+            ? `⚔ 出征 · ${LEVELS[props.levelId].short} / ${TRACKS[props.trackId].name} / ${HEROES[props.weaponId].short}`
+            : levelLocked
+              ? "关卡未解锁"
+              : trackLocked
+                ? "曲目未解锁"
+                : needArcher
+                  ? "需要弓使"
+                  : "选择武将"}
         </button>
       </div>
-      <p className="lede">
-        一局只绑一首歌。角色可多选，进关后用 1/2/3 切换，歌不会停，血量共用一条。名曲为旋律编配；亦可放置{" "}
-        <code>web/public/audio/track-N.ogg</code> 替换为更高音质录音。
-      </p>
-      <p className="tag">TRACK</p>
-      <div className="cards select-scroll">
-        {(Object.values(TRACKS) as (typeof TRACKS)[TrackId][]).map((t) => (
-          <button
-            key={t.trackId}
-            className={t.trackId === props.trackId ? "card selected" : "card"}
-            onClick={() => props.onTrack(t.trackId)}
-          >
-            <div className="kicker">{t.bpmLabel} BPM · {t.composer}</div>
-            <h3>{t.name}</h3>
-            <p>{t.beatTimesMs.length} 拍 · loop {(t.loopMs / 1000).toFixed(1)}s</p>
-          </button>
-        ))}
-      </div>
-      <p className="tag">角色</p>
-      <div className="cards select-scroll">
-        {(Object.values(HEROES) as (typeof HEROES)[WeaponId][]).map((hero) => (
-          <button
-            key={hero.id}
-            className={props.weaponIds.includes(hero.id) ? "card selected" : "card"}
-            onClick={() => props.onToggleWeapon(hero.id)}
-          >
-            <div className="kicker">HERO {hero.id} · {hero.short}</div>
-            <h3>{hero.name}</h3>
-            <p>{hero.desc}</p>
-            <p>{hero.ult}</p>
-          </button>
-        ))}
-      </div>
-      <div className="screen-footer">
-        <button className="primary" disabled={!canStart} onClick={props.onStart}>
-          {canStart ? "开始训练场" : "至少选 1 个角色"}
-        </button>
-      </div>
-    </div>
+      <GuideSpotlight
+        active={guideStep === "select_shop"}
+        targetId="select-shop"
+        label={guideStepLabel("select_shop")}
+      />
+      <GuideSpotlight
+        active={guideStep === "select_archer"}
+        targetId="select-archer-3"
+        label={guideStepLabel("select_archer")}
+      />
+      <GuideSpotlight
+        active={guideStep === "select_track"}
+        targetId="select-track-2"
+        label={guideStepLabel("select_track")}
+      />
+      <GuideSpotlight
+        active={guideStep === "select_level2"}
+        targetId="select-level-2"
+        label={guideStepLabel("select_level2")}
+      />
+    </MenuScreen>
   );
 }

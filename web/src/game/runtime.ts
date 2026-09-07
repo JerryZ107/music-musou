@@ -12,12 +12,12 @@ import {
 import { beginCombat, createSim, doAttack, doSlide, doUltimate, forfeitRevive as forfeitReviveSim, nearestBoss, restartRun, reviveRun, stepSim, switchWeapon } from "./sim";
 import { computeRunResult } from "./runResult";
 import { TRACKS } from "./tracks";
-import type { HudSnapshot, RunResult, Sim, TrackId, WeaponId } from "./types";
+import type { HudSnapshot, RunResult, Sim, TrackId, LevelId, WeaponId, BeatCue } from "./types";
 import { WorldRenderer } from "../pixi/worldRenderer";
 
 export interface RuntimeConfig {
+  levelId: LevelId;
   trackId: TrackId;
-  weaponIds: WeaponId[];
   weaponId: WeaponId;
   audioLatencyMs: number;
   muted: boolean;
@@ -42,21 +42,22 @@ export class GameRuntime {
   private queuedAttack = false;
   private queuedSlide = false;
   private queuedUlt = false;
-  private hudWasOk = false;
+  private hudWasCombat = false;
   private hudMs = 0;
   private reported: RunResult | null = null;
   private lastHudEmit = 0;
   private paused = false;
 
-  private consumedBeatSlot: string | null = null; // 每拍仅允许一次卡拍强化（攻或滑步）
+  private consumedAttackBeatSlot: string | null = null;
+  private consumedSlideBeatSlot: string | null = null;
 
   constructor(cfg: RuntimeConfig) {
     this.viewW = cfg.touch ? VIEW_W_TOUCH : VIEW_W_DESKTOP;
     this.viewH = cfg.touch ? VIEW_H_TOUCH : VIEW_H_DESKTOP;
     this.sim = createSim({
+      levelId: cfg.levelId,
       trackId: cfg.trackId,
       weaponId: cfg.weaponId,
-      allowedWeapons: cfg.weaponIds,
       tutorial: cfg.tutorial,
     });
     this.beat = new BeatGridClock(TRACKS[cfg.trackId], BEAT_WINDOW_MS, cfg.audioLatencyMs);
@@ -82,12 +83,24 @@ export class GameRuntime {
     this.world = new WorldRenderer(app);
     try {
       await this.audio.play(this.sim.trackId);
+      this.syncBeatToAudio(this.sim.trackId);
     } catch {
       /* 浏览器可能拦截自动播放；首次按键后仍可 [M] 再试 */
     }
     if (this.dead) return;
     app.ticker.add(() => this.loop());
     this.emitHud(true);
+  }
+
+  /** 横屏壳层生效后补一次尺寸同步（resizeTo 首帧可能量错）。 */
+  syncCanvasSize(): void {
+    const app = this.app;
+    const host = app?.canvas.parentElement;
+    if (!app || !host) return;
+    const w = host.clientWidth;
+    const h = host.clientHeight;
+    if (w < 1 || h < 1) return;
+    app.renderer.resize(w, h);
   }
 
   destroy(): void {
@@ -132,7 +145,10 @@ export class GameRuntime {
     void (async () => {
       try {
         await this.audio.unlock();
-        if (!this.audio.playingTrack) await this.audio.play(this.sim.trackId);
+        if (!this.audio.playingTrack) {
+          await this.audio.play(this.sim.trackId);
+          this.syncBeatToAudio(this.sim.trackId);
+        }
       } catch {
         /* autoplay */
       }
@@ -144,12 +160,19 @@ export class GameRuntime {
   }
 
   startCombat(): void {
+    this.kickAudio();
     if (this.sim.run === "tutorial") beginCombat(this.sim);
+  }
+
+  /** 在用户手势回调里调用，尽量恢复 BGM。 */
+  ensureAudioPlaying(): void {
+    this.kickAudio();
   }
 
   restart(tutorial: boolean): void {
     this.reported = null;
-    this.consumedBeatSlot = null;
+    this.consumedAttackBeatSlot = null;
+    this.consumedSlideBeatSlot = null;
     restartRun(this.sim, tutorial);
   }
 
@@ -212,38 +235,60 @@ export class GameRuntime {
     return this.buildHud();
   }
 
-  private onBeatNow(): boolean {
+  private onBeatNow(kind: "attack" | "slide"): boolean {
     const t = this.audio.timelineMs(this.sim.nowMs);
-    if (!this.beat.judgmentForCombat(t, this.hudWasOk, this.hudMs)) return false;
+    if (!this.beat.judgmentForCombat(t, this.hudWasCombat, this.hudMs)) return false;
     const slot = this.beat.beatSlotKey(t);
-    if (this.consumedBeatSlot === slot) return false;
+    const consumed = kind === "attack" ? this.consumedAttackBeatSlot : this.consumedSlideBeatSlot;
+    if (consumed === slot) return false;
     return true;
   }
 
-  private consumeBeatSlot(): void {
+  private consumeBeatSlot(kind: "attack" | "slide"): void {
     const t = this.audio.timelineMs(this.sim.nowMs);
-    this.consumedBeatSlot = this.beat.beatSlotKey(t);
+    const slot = this.beat.beatSlotKey(t);
+    if (kind === "attack") this.consumedAttackBeatSlot = slot;
+    else this.consumedSlideBeatSlot = slot;
+  }
+
+  private syncBeatToAudio(trackId: TrackId): void {
+    if (!this.audio.isUsingAudioFile(trackId)) return;
+    const audioMs = this.audio.bufferDurationMs(trackId);
+    if (audioMs) this.beat.syncToAudioDuration(audioMs);
+  }
+
+  private beatCue(timelineMs: number): BeatCue {
+    return {
+      phase01: this.beat.beatPhase01(timelineMs),
+      inZone: this.beat.hudInZone(timelineMs),
+      inSilverZone: this.beat.hudInSilverZone(timelineMs),
+      inCombatZone: this.beat.combatBeatZone(timelineMs),
+      proximity: this.beat.beatProximity(timelineMs),
+      windowFrac: this.beat.hudWindowFrac(),
+      silverPreFrac: this.beat.hudSilverPreFrac(),
+    };
   }
 
   private loop(): void {
     if (this.dead || !this.app || !this.world) return;
     if (this.paused) {
-      this.world.render(this.sim, this.viewW, this.viewH, this.sim.nowMs);
+      const drawT = this.audio.timelineMs(this.sim.nowMs);
+      this.world.render(this.sim, this.viewW, this.viewH, this.sim.nowMs, this.beatCue(drawT));
       this.emitHud(false);
       return;
     }
     const dt = this.app.ticker.deltaMS;
     if (this.queuedAttack) {
-      const onBeat = this.onBeatNow();
+      const onBeat = this.onBeatNow("attack");
       if (doAttack(this.sim, onBeat)) {
-        if (onBeat) this.consumeBeatSlot();
+        if (onBeat) this.consumeBeatSlot("attack");
       }
       this.queuedAttack = false;
     }
     if (this.queuedSlide) {
-      const onBeat = this.onBeatNow();
+      const onBeat = this.onBeatNow("slide");
       if (doSlide(this.sim, onBeat, this.moveX, this.moveY)) {
-        if (onBeat) this.consumeBeatSlot();
+        if (onBeat) this.consumeBeatSlot("slide");
       }
       this.queuedSlide = false;
     }
@@ -253,9 +298,9 @@ export class GameRuntime {
     }
     stepSim(this.sim, dt, this.moveX, this.moveY);
     const drawT = this.audio.timelineMs(this.sim.nowMs);
-    this.hudWasOk = this.beat.hudInZone(drawT);
+    this.hudWasCombat = this.beat.combatBeatZone(drawT);
     this.hudMs = drawT;
-    this.world.render(this.sim, this.viewW, this.viewH, this.sim.nowMs);
+    this.world.render(this.sim, this.viewW, this.viewH, this.sim.nowMs, this.beatCue(drawT));
     if (this.sim.run === "win" || this.sim.run === "lose") {
       const shouldReport = this.sim.run === "win" || !this.sim.reviveAvailable;
       if (shouldReport) this.reportOutcome();
@@ -285,8 +330,8 @@ export class GameRuntime {
       energy: this.sim.energy,
       energyMax: ULTIMATE_BEAT_CHARGES,
       weaponId: this.sim.weaponId,
-      allowedWeapons: this.sim.allowedWeapons,
       trackId: this.sim.trackId,
+      levelId: this.sim.levelId,
       enemyCount: this.sim.enemies.length,
       pendingCount: this.sim.pendingWaves.reduce((n, wave) => n + wave.length, 0),
       wave: this.sim.wave,
@@ -297,11 +342,16 @@ export class GameRuntime {
       nearestBossMax: boss?.maxHp ?? null,
       beatPhase01: this.beat.beatPhase01(t),
       inZone: this.beat.hudInZone(t),
+      inSilverZone: this.beat.hudInSilverZone(t),
+      inCombatZone: this.beat.combatBeatZone(t),
       beatProximity: this.beat.beatProximity(t),
       windowFrac: this.beat.hudWindowFrac(),
+      silverPreFrac: this.beat.hudSilverPreFrac(),
+      beatCount: this.beat.beatTimesMs.length,
       ultReady: this.sim.energy >= ULTIMATE_BEAT_CHARGES,
-      spearThrustCharges: this.sim.spearThrustCharges,
-      samuraiSlideCharges: this.sim.samuraiSlideCharges,
+      ultBuffRemainingMs: Math.max(0, this.sim.ultBuffUntilMs - this.sim.nowMs),
+      spearUltAttacksLeft: this.sim.spearUltAttacksLeft,
+      spearAtkSpeedStacks: this.sim.spearAtkSpeedStacks,
       shieldHp: this.sim.shieldHp,
       latencyMs: this.audio.latencyMs,
       muted: this.audio.muted,

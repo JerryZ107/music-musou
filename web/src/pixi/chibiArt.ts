@@ -505,11 +505,11 @@ export class ArtBank {
 }
 
 export const SPRITE_SIZE = {
-  hero: { w: 1.28, h: 1.68 },
-  minion: { w: 1.58, h: 1.98 },
-  boss: { w: 2.5, h: 3.1 },
-  megaboss: { w: 3.15, h: 3.85 },
-  clone: { w: 1.22, h: 1.6 },
+  hero: { w: 0.96, h: 1.26 },
+  minion: { w: 2.37, h: 2.97 },
+  boss: { w: 3.75, h: 4.65 },
+  megaboss: { w: 4.725, h: 5.775 },
+  clone: { w: 0.915, h: 1.2 },
   tree: { w: 2.2, h: 2.9 },
   lamp: { w: 0.72, h: 2.2 },
   stone: { w: 0.95, h: 0.85 },

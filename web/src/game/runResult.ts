@@ -37,6 +37,7 @@ export function computeRunResult(sim: Sim): RunResult {
     hpLeft,
     damageTaken,
     trackId: sim.trackId,
+    levelId: sim.levelId,
     weaponId: sim.weaponId,
   };
 }

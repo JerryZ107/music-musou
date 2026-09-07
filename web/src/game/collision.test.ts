@@ -73,7 +73,7 @@ describe("圆形体积碰撞", () => {
   });
 
   it("接触没有额外攻击圈：隔开一格碰到身体才算", () => {
-    const gap = { x: 11, y: 10, r: MINION_RADIUS };
+    const gap = { x: 10 + PLAYER_RADIUS + MINION_RADIUS + 0.05, y: 10, r: MINION_RADIUS };
     expect(circlesOverlap(player, gap)).toBe(false);
   });
 });

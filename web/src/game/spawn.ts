@@ -158,7 +158,11 @@ function spawnRing(
 }
 
 /** 一关按波次推进：四个 Boss 院落到中央中王，节奏更有层次。 */
-export function createWavePlan(nextId: { n: number }, seed = 42): Enemy[][] {
+export function createWavePlan(
+  nextId: { n: number },
+  opts?: { includeFinalBoss?: boolean },
+  seed = 42,
+): Enemy[][] {
   const rng = mulberry32(seed);
   const waves: Enemy[][] = [];
   const specs: ArenaWaveSpec[] = [
@@ -187,31 +191,33 @@ export function createWavePlan(nextId: { n: number }, seed = 42): Enemy[][] {
     enemies.push(...outer);
     waves.push(enemies);
   }
-  // 中央广场：1 王中王 + 2 尸王 + 大群杂兵从外圈压入。
-  const finalWave: Enemy[] = [
-    {
-      id: nextId.n++,
-      kind: "megaboss",
-      x: PLAZA.x,
-      y: PLAZA.y - 4.5,
-      r: radiusForKind("megaboss"),
-      hp: MEGABOSS_HP,
-      maxHp: MEGABOSS_HP,
-    },
-  ];
-  for (let i = 0; i < 2; i++) {
-    const ang = Math.PI * 0.25 + (i / 2) * Math.PI;
-    finalWave.push({
-      id: nextId.n++,
-      kind: "boss",
-      x: PLAZA.x + Math.cos(ang) * 5.2,
-      y: PLAZA.y + Math.sin(ang) * 4.2,
-      r: radiusForKind("boss"),
-      hp: BOSS_HP,
-      maxHp: BOSS_HP,
-    });
+  if (opts?.includeFinalBoss !== false) {
+    // 中央广场：1 王中王 + 2 尸王 + 大群杂兵从外圈压入。
+    const finalWave: Enemy[] = [
+      {
+        id: nextId.n++,
+        kind: "megaboss",
+        x: PLAZA.x,
+        y: PLAZA.y - 4.5,
+        r: radiusForKind("megaboss"),
+        hp: MEGABOSS_HP,
+        maxHp: MEGABOSS_HP,
+      },
+    ];
+    for (let i = 0; i < 2; i++) {
+      const ang = Math.PI * 0.25 + (i / 2) * Math.PI;
+      finalWave.push({
+        id: nextId.n++,
+        kind: "boss",
+        x: PLAZA.x + Math.cos(ang) * 5.2,
+        y: PLAZA.y + Math.sin(ang) * 4.2,
+        r: radiusForKind("boss"),
+        hp: BOSS_HP,
+        maxHp: BOSS_HP,
+      });
+    }
+    spawnRing(nextId, PLAZA.x, PLAZA.y, PLAZA.r + 1.2, PLAZA.r + 3.8, 38, mulberry32(505), finalWave);
+    waves.push(finalWave);
   }
-  spawnRing(nextId, PLAZA.x, PLAZA.y, PLAZA.r + 1.2, PLAZA.r + 3.8, 38, mulberry32(505), finalWave);
-  waves.push(finalWave);
   return waves;
 }

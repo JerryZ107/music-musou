@@ -1,21 +1,39 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import {
-  ATTACK_RANGE,
   BOSS_ATTACK_RADIUS,
   BOSS_WINDUP_MS,
   MEGABOSS_ATTACK_RADIUS,
   MEGABOSS_WINDUP_MS,
   MINION_TELEGRAPH_RADIUS,
   MINION_WINDUP_MS,
+  SAMURAI_MODEL_SCALE,
+  ARCHER_MODEL_SCALE,
   SPEAR_ARC_DEG,
-  TEMPLATE2_ATTACK_RANGE,
+  SPEAR_MODEL_SCALE,
   WORLD_H,
   WORLD_W,
 } from "../game/constants";
-import { cameraOrigin, samuraiShieldActive, ultBuffActive } from "../game/sim";
-import type { AttackFlash, Enemy, Sim } from "../game/types";
+import { cameraOrigin, attackRadius, samuraiShieldActive, ultBuffActive } from "../game/sim";
+import type { AttackFlash, BeatCue, Enemy, Sim } from "../game/types";
 import { ArtBank, SPRITE_SIZE, type HeroKey, type PropKind } from "./chibiArt";
 import { buildStageArt, type StageProp } from "./stageMap";
+
+/** 烘焙贴图刀尖/锚点（与 chibiArt drawBlade/drawSpear 一致）。 */
+const MELEE_ANCHOR_X = 0.14;
+const BLADE_TIP_TEXTURE_X = 332 / 340;
+const SPEAR_TIP_TEXTURE_X = 372 / 380;
+
+/** 将世界攻击半径换算为未缩放前的武器 sprite 宽度，使刀尖/枪尖贴合判定圈。 */
+function meleeSpriteWidth(
+  worldRange: number,
+  modelScale: number,
+  tipTextureX: number,
+  gripOffset: number,
+): number {
+  const tipFromAnchor = tipTextureX - MELEE_ANCHOR_X;
+  const localReach = worldRange / modelScale - gripOffset;
+  return Math.max(0.35, localReach / tipFromAnchor);
+}
 
 type ActorNode = {
   root: Container;
@@ -27,11 +45,12 @@ type ActorNode = {
 };
 
 function flashProgress(flash: AttackFlash, nowMs: number): number {
-  const left = Math.max(0, flash.untilMs - nowMs);
   let dur = 120;
   if (flash.path) dur = 160;
-  else if (flash.kind === "ult" || left > 125) dur = 200;
-  return Math.max(0, Math.min(1, 1 - left / dur));
+  else if (flash.kind === "ult" || flash.untilMs - nowMs > 125) dur = 200;
+  const startMs = flash.startMs ?? flash.untilMs - dur;
+  const total = Math.max(1, flash.untilMs - startMs);
+  return Math.max(0, Math.min(1, (nowMs - startMs) / total));
 }
 
 function strokeArc(
@@ -106,7 +125,7 @@ export class WorldRenderer {
     this.ready = true;
   }
 
-  render(sim: Sim, viewW: number, viewH: number, nowMs: number): void {
+  render(sim: Sim, viewW: number, viewH: number, nowMs: number, beatCue?: BeatCue): void {
     if (!this.ready) return;
     const { width, height } = this.app.renderer;
     const cell = Math.min(width / viewW, height / viewH);
@@ -131,7 +150,7 @@ export class WorldRenderer {
     this.syncBullets(sim);
     this.drawPlayer(sim, nowMs);
     this.drawDamagePopups(sim, nowMs);
-    this.drawAirFx(sim, nowMs);
+    this.drawAirFx(sim, nowMs, beatCue);
   }
 
   private drawDamagePopups(sim: Sim, nowMs: number): void {
@@ -457,7 +476,13 @@ export class WorldRenderer {
         this.puffs.push({ x: c.x, y: c.y, until: nowMs + 420 });
         this.sparks.push({ x: c.x, y: c.y, until: nowMs + 320 });
       }
-      this.face(node.sprite, SPRITE_SIZE.clone.w, SPRITE_SIZE.clone.h, sim.player.facingX);
+      const cloneScale = ARCHER_MODEL_SCALE * (SPRITE_SIZE.hero.w / SPRITE_SIZE.clone.w);
+      this.face(
+        node.sprite,
+        SPRITE_SIZE.clone.w * cloneScale,
+        SPRITE_SIZE.clone.h * cloneScale,
+        sim.player.facingX,
+      );
       node.sprite.y = Math.sin(nowMs * 0.01 + c.id) * 0.06;
       node.sprite.tint = nowMs - c.lastHurtMs < 180 ? 0xffaaaa : 0xffffff;
       node.root.position.set(c.x, c.y);
@@ -491,18 +516,28 @@ export class WorldRenderer {
         gfx.lineTo(-b.r * 0.2, 0);
         gfx.stroke({ width: 0.06, color: 0xff8899, alpha: 0.55, cap: "round" });
       } else {
-        const color = b.explosive ? 0xff8844 : b.enhanced ? 0x9ad4ff : 0xffe08a;
-        gfx.moveTo(-b.r * 2.4, 0);
-        gfx.lineTo(b.r * 1.8, -b.r * 0.55);
-        gfx.lineTo(b.r * 2.8, 0);
-        gfx.lineTo(b.r * 1.8, b.r * 0.55);
+        const blue = 0x9ad4ff;
+        const blueShaft = 0xc8e8ff;
+        const color = b.explosive ? 0xff8844 : blue;
+        const shaft = b.explosive ? 0xffc06a : blueShaft;
+        const headW = b.r * 0.32;
+        const headL = b.r * 1.55;
+        const tailL = b.r * 1.65;
+        gfx.moveTo(-tailL, 0);
+        gfx.lineTo(headL, -headW);
+        gfx.lineTo(headL + b.r * 0.35, 0);
+        gfx.lineTo(headL, headW);
         gfx.closePath();
         gfx.fill(color);
-        gfx.rect(-b.r * 2.2, -b.r * 0.18, b.r * 2.4, b.r * 0.36);
-        gfx.fill(b.explosive ? 0xffc06a : b.enhanced ? 0xc8e8ff : 0xd4a06a);
+        gfx.rect(-tailL, -b.r * 0.1, tailL + headL * 0.7, b.r * 0.2);
+        gfx.fill(shaft);
         if (b.explosive) {
-          gfx.circle(b.r * 1.2, 0, b.r * 0.55);
+          gfx.circle(headL * 0.55, 0, b.r * 0.38);
           gfx.fill({ color: 0xfff0a0, alpha: 0.75 });
+        } else if (b.enhanced) {
+          gfx.moveTo(-tailL * 0.85, 0);
+          gfx.lineTo(headL + b.r * 0.2, 0);
+          gfx.stroke({ width: 0.04, color: 0xe8f4ff, alpha: 0.7, cap: "round" });
         }
       }
       gfx.position.set(b.x, b.y);
@@ -521,16 +556,23 @@ export class WorldRenderer {
     const tex = frames[frame]!;
     if (node.sprite.texture !== tex) {
       node.sprite.texture = tex;
-      node.sprite.width = SPRITE_SIZE.hero.w;
-      node.sprite.height = SPRITE_SIZE.hero.h;
     }
+    node.sprite.width = SPRITE_SIZE.hero.w;
+    node.sprite.height = SPRITE_SIZE.hero.h;
     this.lastPlayerX = p.x;
     this.lastPlayerY = p.y;
     const sliding = sim.nowMs < sim.slideUntil;
     const bob = sliding ? 0 : Math.sin(nowMs * 0.012) * 0.04;
     const lean = sliding ? 0.13 : moving ? Math.sin(nowMs * 0.012) * 0.05 : 0;
     this.playerPose.y = bob;
-    this.playerPose.scale.x = p.facingX < -0.12 ? -1 : 1;
+    const modelScale =
+      sim.weaponId === 1
+        ? SAMURAI_MODEL_SCALE
+        : sim.weaponId === 2
+          ? SPEAR_MODEL_SCALE
+          : ARCHER_MODEL_SCALE;
+    const flip = p.facingX < -0.12 ? -1 : 1;
+    this.playerPose.scale.set(flip * modelScale, modelScale);
     this.playerPose.rotation = p.facingX < -0.12 ? -lean : lean;
     if (sliding) this.slideTrail.push({ x: p.x, y: p.y, until: nowMs + 170 });
     const hurt = nowMs - sim.lastHurtMs < 180;
@@ -548,6 +590,48 @@ export class WorldRenderer {
     this.syncMelee(sim);
     node.root.position.set(p.x, p.y);
     node.root.zIndex = p.y + 0.05;
+  }
+
+  /** 脚下节拍环：银环预警 → 金环强拍，强普判定与银→金结束对齐。 */
+  private drawBeatCue(sim: Sim, nowMs: number, cue: BeatCue | undefined, g: Graphics): void {
+    if (!cue || (sim.run !== "playing" && sim.run !== "tutorial")) return;
+    if (!cue.inCombatZone && !cue.inZone) {
+      if (cue.proximity < 0.2) return;
+    }
+
+    const p = sim.player;
+    const py = p.y - 0.08;
+    const pulse = 0.5 + 0.5 * Math.sin(nowMs * 0.022);
+    const baseR = p.r + 0.22;
+    const innerR = baseR * 0.68;
+    const outerR = baseR + 0.28 + pulse * 0.1;
+
+    if (cue.inCombatZone) {
+      g.circle(p.x, py, innerR);
+      g.stroke({
+        width: cue.inSilverZone ? 0.12 : 0.1,
+        color: 0xd8e8f8,
+        alpha: cue.inSilverZone ? 0.75 + pulse * 0.2 : 0.55 + pulse * 0.15,
+      });
+      if (cue.inSilverZone) {
+        g.circle(p.x, py, innerR * 0.82);
+        g.stroke({ width: 0.07, color: 0xf0f8ff, alpha: 0.5 + pulse * 0.25 });
+      }
+    }
+
+    if (cue.inZone) {
+      g.circle(p.x, py, outerR);
+      g.stroke({ width: 0.1, color: 0xffe08a, alpha: 0.55 + pulse * 0.25 });
+      g.circle(p.x, py, baseR + 0.12);
+      g.stroke({ width: 0.14, color: 0xfff6c8, alpha: 0.88 });
+      for (let i = 0; i < 4; i++) {
+        const ang = (i / 4) * Math.PI * 2 + nowMs * 0.004;
+        const sx = p.x + Math.cos(ang) * (outerR + 0.12);
+        const sy = py + Math.sin(ang) * (outerR + 0.12);
+        g.circle(sx, sy, 0.07 + pulse * 0.03);
+        g.fill({ color: 0xffe08a, alpha: 0.8 });
+      }
+    }
   }
 
   private drawShieldAura(sim: Sim, nowMs: number, g: Graphics): void {
@@ -570,8 +654,8 @@ export class WorldRenderer {
       melee.texture = this.art.bow;
       melee.visible = true;
       melee.anchor.set(0.55, 0.5);
-      melee.width = 0.72;
-      melee.height = 1.22;
+      melee.width = 0.72 / ARCHER_MODEL_SCALE;
+      melee.height = 1.22 / ARCHER_MODEL_SCALE;
       melee.position.set(0.32, -0.22);
       const drawing = sim.nowMs - sim.lastAttackMs < 140;
       melee.rotation = drawing ? -0.55 : -0.18;
@@ -579,17 +663,20 @@ export class WorldRenderer {
       return;
     }
     const blade = sim.weaponId === 1;
+    const modelScale = blade ? SAMURAI_MODEL_SCALE : SPEAR_MODEL_SCALE;
     melee.texture = blade ? this.art.blade : this.art.spear;
     melee.visible = true;
-    melee.anchor.set(0.14, 0.5);
+    melee.anchor.set(MELEE_ANCHOR_X, 0.5);
     const swinging =
       !!flash &&
       (blade
         ? flash.kind === "circle" || flash.kind === "ult"
         : flash.kind === "arc" || flash.kind === "semicircle" || flash.kind === "line");
-    const len = swinging ? flash!.radius : blade ? ATTACK_RANGE : TEMPLATE2_ATTACK_RANGE;
-    melee.width = blade ? len * 1.02 : len * 0.98;
-    melee.height = blade ? 0.32 : 0.26;
+    const range = swinging ? flash!.radius : attackRadius(sim.weaponId, ultBuffActive(sim));
+    const grip = swinging ? (blade ? 0.12 : 0.1) : blade ? 0.33 : 0.22;
+    const tipX = blade ? BLADE_TIP_TEXTURE_X : SPEAR_TIP_TEXTURE_X;
+    melee.width = meleeSpriteWidth(range, modelScale, tipX, grip);
+    melee.height = (blade ? 0.32 : 0.26) / modelScale;
     if (swinging && flash) {
       melee.position.set(0.04, -0.1);
       const t = flashProgress(flash, sim.nowMs);
@@ -631,16 +718,18 @@ export class WorldRenderer {
         (kind === "minion" ? MINION_TELEGRAPH_RADIUS : kind === "boss" ? BOSS_ATTACK_RADIUS : MEGABOSS_ATTACK_RADIUS);
       if (e.attackKind === "lunge") {
         const dir = Math.atan2(e.attackY ?? 0, e.attackX ?? 1);
-        const x0 = e.x;
-        const y0 = e.y;
-        const x1 = x0 + Math.cos(dir) * radius * 1.7;
-        const y1 = y0 + Math.sin(dir) * radius * 1.7;
+        const x0 = e.lungeFromX ?? e.x;
+        const y0 = e.lungeFromY ?? e.y;
+        const x1 = e.lungeToX ?? x0 + Math.cos(dir) * (e.lungeDist ?? radius * 1.2);
+        const y1 = e.lungeToY ?? y0 + Math.sin(dir) * (e.lungeDist ?? radius * 1.2);
         g.moveTo(x0, y0);
         g.lineTo(x1, y1);
         g.stroke({ width: 0.1 + t * 0.06, color: 0xffb14a, alpha: 0.35 + t * 0.3, cap: "round" });
-        g.circle(x1, y1, radius * (0.35 + t * 0.3));
-        g.fill({ color: 0xff6a3c, alpha: 0.12 + t * 0.12 });
-        g.circle(x0, y0, radius * 0.42);
+        g.circle(x1, y1, radius);
+        g.stroke({ width: 0.08 + t * 0.04, color: 0xff6a3c, alpha: 0.35 + t * 0.25 });
+        g.circle(x1, y1, radius * 0.55);
+        g.fill({ color: 0xff6a3c, alpha: 0.1 + t * 0.1 });
+        g.circle(x0, y0, e.r * 0.55);
         g.fill({ color: 0xffe08a, alpha: 0.14 + t * 0.1 });
       } else {
         g.circle(e.x, e.y, radius);
@@ -663,9 +752,10 @@ export class WorldRenderer {
     }
   }
 
-  private drawAirFx(sim: Sim, nowMs: number): void {
+  private drawAirFx(sim: Sim, nowMs: number, beatCue?: BeatCue): void {
     const g = this.airFx;
     g.clear();
+    this.drawBeatCue(sim, nowMs, beatCue, g);
     this.drawShieldAura(sim, nowMs, g);
     if (sim.ultFxUntilMs > nowMs) {
       const t = 1 - (sim.ultFxUntilMs - nowMs) / 560;

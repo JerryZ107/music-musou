@@ -1,19 +1,61 @@
-import { BEAT_WINDOW_MS, HUD_GRACE_MS } from "./constants";
+import { BEAT_SILVER_PRE_MS, BEAT_WINDOW_MS, HUD_GRACE_MS } from "./constants";
 import type { MusicProfile } from "./types";
+
+/** loop 内时间 t 到最近拍点的最短距离（毫秒）。 */
+function distToNearestBeat(t: number, beats: readonly number[], loopMs: number): number {
+  if (beats.length === 0) return Infinity;
+  let best = Infinity;
+  for (const beat of beats) {
+    let d = Math.abs(t - beat);
+    d = Math.min(d, loopMs - d);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/** 相对最近拍点的有符号偏移（负=拍前，正=拍后）。 */
+function offsetFromNearestBeat(
+  t: number,
+  beats: readonly number[],
+  loopMs: number,
+): { offsetMs: number } {
+  if (beats.length === 0) return { offsetMs: Infinity };
+  let bestOffset = Infinity;
+  for (const beat of beats) {
+    let offset = t - beat;
+    if (offset > loopMs / 2) offset -= loopMs;
+    if (offset < -loopMs / 2) offset += loopMs;
+    if (Math.abs(offset) < Math.abs(bestOffset)) bestOffset = offset;
+  }
+  return { offsetMs: bestOffset };
+}
 
 export class BeatGridClock {
   loopMs: number;
-  beatTimesMs: readonly number[];
+  beatTimesMs: number[];
   periodMs: number;
   beatWindowMs: number;
   audioLatencyMs: number;
 
   constructor(profile: MusicProfile, beatWindowMs = BEAT_WINDOW_MS, audioLatencyMs = 0) {
     this.loopMs = profile.loopMs;
-    this.beatTimesMs = profile.beatTimesMs;
-    this.periodMs = profile.loopMs / Math.max(1, profile.beatTimesMs.length);
+    this.beatTimesMs = [...profile.beatTimesMs];
+    this.periodMs = medianBeatPeriod(this.beatTimesMs, profile.loopMs);
     this.beatWindowMs = beatWindowMs;
     this.audioLatencyMs = audioLatencyMs;
+  }
+
+  /** 录音实际时长与 JSON 不一致时，按比例缩放拍点。 */
+  syncToAudioDuration(audioDurationMs: number): void {
+    if (audioDurationMs <= 0 || this.beatTimesMs.length === 0) return;
+    const scale = audioDurationMs / this.loopMs;
+    if (Math.abs(scale - 1) < 0.001) {
+      this.loopMs = audioDurationMs;
+      return;
+    }
+    this.beatTimesMs = this.beatTimesMs.map((t) => t * scale);
+    this.loopMs = audioDurationMs;
+    this.periodMs = medianBeatPeriod(this.beatTimesMs, this.loopMs);
   }
 
   tLoop(timelineMs: number): number {
@@ -22,6 +64,49 @@ export class BeatGridClock {
     return t;
   }
 
+  private goldHalfMs(): number {
+    return this.beatWindowMs / 2;
+  }
+
+  private offsetForBeat(tLoop: number, beatMs: number): number {
+    let offset = tLoop - beatMs;
+    if (offset > this.loopMs / 2) offset -= this.loopMs;
+    if (offset < -this.loopMs / 2) offset += this.loopMs;
+    return offset;
+  }
+
+  beatOffsetMs(timelineMs: number): number {
+    return offsetFromNearestBeat(this.tLoop(timelineMs), this.beatTimesMs, this.loopMs).offsetMs;
+  }
+
+  /** 金环亮区：拍点 ± 半窗。 */
+  hudInZone(timelineMs: number): boolean {
+    const half = this.goldHalfMs();
+    const t = this.tLoop(timelineMs);
+    return this.beatTimesMs.some((beat) => Math.abs(this.offsetForBeat(t, beat)) <= half);
+  }
+
+  /** 银环专属阶段：金环亮起前 BEAT_SILVER_PRE_MS。 */
+  hudInSilverZone(timelineMs: number): boolean {
+    const half = this.goldHalfMs();
+    const t = this.tLoop(timelineMs);
+    return this.beatTimesMs.some((beat) => {
+      const offset = this.offsetForBeat(t, beat);
+      return offset >= -(half + BEAT_SILVER_PRE_MS) && offset < -half;
+    });
+  }
+
+  /** 强普判定区：银环亮起 → 金环结束（全英雄通用）。 */
+  combatBeatZone(timelineMs: number): boolean {
+    const half = this.goldHalfMs();
+    const t = this.tLoop(timelineMs);
+    return this.beatTimesMs.some((beat) => {
+      const offset = this.offsetForBeat(t, beat);
+      return offset >= -(half + BEAT_SILVER_PRE_MS) && offset <= half;
+    });
+  }
+
+  /** 当前在相邻两拍之间的进度 0→1（用于节拍条游标）。 */
   beatPhase01(timelineMs: number): number {
     const t = this.tLoop(timelineMs);
     const beats = this.beatTimesMs;
@@ -40,36 +125,38 @@ export class BeatGridClock {
   }
 
   hudWindowFrac(): number {
-    return Math.max(0.18, Math.min(0.45, this.beatWindowMs / this.periodMs));
+    const half = this.goldHalfMs();
+    return Math.max(0.08, Math.min(0.45, half / this.periodMs));
   }
 
-  hudInZone(timelineMs: number): boolean {
-    const p = this.beatPhase01(timelineMs);
-    const w = this.hudWindowFrac();
-    return p <= w || p >= 1.0 - w;
+  /** 银环预警区宽度（含金环半宽 + 提前量），用于节拍条外圈。 */
+  hudSilverPreFrac(): number {
+    const half = this.goldHalfMs();
+    return Math.max(0.1, Math.min(0.55, (half + BEAT_SILVER_PRE_MS) / this.periodMs));
   }
 
   judgmentForCombat(
     inputTimelineMs: number,
-    hudWasOk: boolean,
+    hudWasCombat: boolean,
     hudTimelineMs: number,
     graceMs = HUD_GRACE_MS,
   ): boolean {
-    if (this.hudInZone(inputTimelineMs)) return true;
-    if (hudWasOk && Math.abs(inputTimelineMs - hudTimelineMs) <= graceMs) return true;
+    if (this.combatBeatZone(inputTimelineMs)) return true;
+    if (hudWasCombat && Math.abs(inputTimelineMs - hudTimelineMs) <= graceMs) return true;
     return false;
   }
 
   beatProximity(timelineMs: number): number {
-    if (this.hudInZone(timelineMs)) return 1;
-    const p = this.beatPhase01(timelineMs);
-    const w = this.hudWindowFrac();
-    const gap = p < 0.5 ? Math.max(0, p - w) : Math.max(0, 1 - w - p);
-    const span = Math.max(0.06, 0.5 - w);
-    return Math.max(0, 1 - gap / span);
+    const t = this.tLoop(timelineMs);
+    const half = this.goldHalfMs();
+    const dist = distToNearestBeat(t, this.beatTimesMs, this.loopMs);
+    if (dist <= half) return 1;
+    const silverEdge = half + BEAT_SILVER_PRE_MS;
+    if (dist <= silverEdge) return 0.55 + (0.45 * (silverEdge - dist)) / BEAT_SILVER_PRE_MS;
+    const span = Math.max(silverEdge, this.periodMs * 0.35);
+    return Math.max(0, 1 - (dist - silverEdge) / span);
   }
 
-  /** 当前时间落在哪一拍（loop 内索引）。 */
   beatIndexAt(timelineMs: number): number {
     const t = this.tLoop(timelineMs);
     const beats = this.beatTimesMs;
@@ -84,13 +171,18 @@ export class BeatGridClock {
     return 0;
   }
 
-  /** 跨 loop 唯一的拍子槽位键，用于「一拍只强化一次」。 */
   beatSlotKey(timelineMs: number): string {
     const loop = Math.floor(timelineMs / this.loopMs);
     const t = this.tLoop(timelineMs);
     const beats = this.beatTimesMs;
     const n = beats.length;
     if (n === 0) return `${loop}:0`;
+    const half = this.goldHalfMs();
+    const combatPre = half + BEAT_SILVER_PRE_MS;
+    for (let i = 0; i < n; i++) {
+      const offset = this.offsetForBeat(t, beats[i]!);
+      if (offset >= -combatPre && offset <= half) return `${loop}:${i}`;
+    }
     let bestIdx = 0;
     let bestDist = Infinity;
     for (let i = 0; i < n; i++) {
@@ -103,6 +195,19 @@ export class BeatGridClock {
     }
     return `${loop}:${bestIdx}`;
   }
+}
+
+/** 相邻拍间隔中位数，比 loop/拍数 更适合不规则/onset 解析曲。 */
+function medianBeatPeriod(beats: readonly number[], loopMs: number): number {
+  if (beats.length < 2) return loopMs / Math.max(1, beats.length);
+  const gaps: number[] = [];
+  for (let i = 0; i < beats.length; i++) {
+    const start = beats[i]!;
+    const end = i + 1 < beats.length ? beats[i + 1]! : loopMs;
+    gaps.push(end - start);
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] ?? loopMs / beats.length;
 }
 
 export function regularBeatGrid(

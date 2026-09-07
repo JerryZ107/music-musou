@@ -1,6 +1,12 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 import "./styles.css";
+import "./styles/menu-theme.css";
 import "./styles/mobile-layout.css";
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>,
+);

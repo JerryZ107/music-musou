@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 import { tryLockLandscape, tryUnlockOrientation, useOrientation } from "./useOrientation";
 
 const STORAGE_KEY = "musicmusou_landscape_mode";
 
-export function readLandscapeModePref(): boolean {
+export function readLandscapeModePref(defaultOnTouch = false): boolean {
   try {
-    return sessionStorage.getItem(STORAGE_KEY) === "1";
+    const stored = sessionStorage.getItem(STORAGE_KEY);
+    if (stored !== null) return stored === "1";
   } catch {
-    return false;
+    /* ignore */
   }
+  return defaultOnTouch;
 }
 
 function writeLandscapeModePref(on: boolean): void {
@@ -19,7 +21,7 @@ function writeLandscapeModePref(on: boolean): void {
   }
 }
 
-/** 竖屏时用 CSS 把整个 #root 旋成横屏可视区域。 */
+/** 竖屏时用 CSS 把战斗层旋成横屏可视区域。 */
 export function syncForcedLandscapeShell(active: boolean, portrait: boolean): void {
   const root = document.documentElement;
   root.classList.toggle("landscape-forced", active && portrait);
@@ -45,9 +47,9 @@ async function requestLandscape(): Promise<void> {
   }
 }
 
-export function useLandscapeMode() {
+export function useLandscapeMode(applyForcedShell = true, touch = false) {
   const { portrait, landscape } = useOrientation();
-  const [forced, setForced] = useState(readLandscapeModePref);
+  const [forced, setForced] = useState(() => readLandscapeModePref(touch));
 
   const enable = useCallback(() => {
     setForced(true);
@@ -64,17 +66,17 @@ export function useLandscapeMode() {
     }
   }, []);
 
-  useEffect(() => {
-    syncForcedLandscapeShell(forced, portrait);
-    const onResize = () => syncForcedLandscapeShell(forced, portrait);
+  useLayoutEffect(() => {
+    const active = applyForcedShell && forced;
+    syncForcedLandscapeShell(active, portrait);
+    const onResize = () => syncForcedLandscapeShell(applyForcedShell && forced, portrait);
     window.addEventListener("resize", onResize);
     window.addEventListener("orientationchange", onResize);
     return () => {
       window.removeEventListener("resize", onResize);
       window.removeEventListener("orientationchange", onResize);
-      document.documentElement.classList.remove("landscape-forced");
     };
-  }, [forced, portrait]);
+  }, [applyForcedShell, forced, portrait]);
 
   const effectiveLandscape = landscape || forced;
 

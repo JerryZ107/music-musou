@@ -5,8 +5,8 @@
   --safe-r: env(safe-area-inset-right, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
-  --joy-size: 148px;
-  --joy-knob: 56px;
+  --joy-size: 197px;
+  --joy-knob: 75px;
   --act-main: 78px;
   --act-sub: 62px;
   --touch-bar-h: 44px;
@@ -78,20 +78,43 @@ html[data-touch="1"][data-orient="landscape"] .select-scroll .card {
   min-height: 72px;
 }
 
-html[data-touch="1"] .screen-footer {
+html[data-touch="1"] .screen-footer,
+html[data-touch="1"] .menu-cta-footer {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 8;
+  z-index: 30;
+  margin-top: 0;
   padding: 10px max(12px, var(--safe-r)) max(10px, var(--safe-b)) max(12px, var(--safe-l));
   background: linear-gradient(180deg, transparent, #12180f 35%);
 }
 
-html[data-touch="1"] .screen-footer .primary {
+html[data-touch="1"] .screen-footer .primary,
+html[data-touch="1"] .menu-cta-footer .primary {
   width: 100%;
   max-width: none;
   min-height: 46px;
+}
+
+html[data-touch="1"] .menu-screen__frame:has(.menu-cta-footer),
+html[data-touch="1"] .menu-screen__frame:has(.screen-footer) {
+  padding-bottom: max(88px, calc(var(--safe-b) + 72px));
+}
+
+html[data-touch="1"] .account-panel input {
+  min-height: 46px;
+  font-size: 16px;
+}
+
+html[data-touch="1"] .account-panel .primary {
+  min-height: 46px;
+}
+
+html[data-touch="1"] .account-chip,
+html[data-touch="1"] .nav-btn {
+  min-height: 44px;
+  touch-action: manipulation;
 }
 
 html[data-touch="1"] .landscape-bar {
@@ -105,32 +128,57 @@ html[data-touch="1"] .landscape-chip {
 }
 
 html[data-touch="1"][data-phase="game"] {
-  --joy-size: clamp(256px, 52vmin, 440px);
+  --touch-shift-x: 18px;
+  --joy-size: clamp(263px, 64vmin, 497px);
   --joy-knob: calc(var(--joy-size) * 0.38);
-  --act-main: clamp(116px, 26vmin, 152px);
-  --act-sub: clamp(96px, 22vmin, 124px);
-  --joy-inset-x: 18px;
+  --act-main: clamp(96px, 24vmin, 160px);
+  --act-sub: clamp(80px, 20vmin, 128px);
+  --joy-inset-x: 0px;
   --joy-inset-y: 6px;
-  --act-inset-x: 22px;
+  --act-inset-x: 16px;
   --act-inset-y: 6px;
-  --touch-bar-h: 38px;
-  --touch-hud-h: 46px;
+  --act-gap: 12px;
+  --touch-cluster-gap: 20px;
+  --touch-bar-h: 36px;
+  --touch-hud-h: 40px;
 }
 
 html[data-touch="1"][data-phase="game"][data-short="1"] {
-  --joy-size: clamp(216px, 44vmin, 336px);
-  --act-main: clamp(104px, 24vmin, 128px);
-  --act-sub: clamp(88px, 20vmin, 108px);
-  --joy-inset-x: 14px;
-  --act-inset-x: 18px;
-  --touch-bar-h: 34px;
-  --touch-hud-h: 40px;
+  --joy-size: clamp(228px, 57vmin, 391px);
+  --act-main: clamp(85px, 21vmin, 139px);
+  --act-sub: clamp(72px, 17vmin, 117px);
+  --touch-bar-h: 32px;
+  --touch-hud-h: 36px;
 }
 
 html[data-touch="1"][data-phase="game"] .game-root {
   grid-template-rows: var(--touch-bar-h) 1fr var(--touch-hud-h);
   height: 100%;
-  height: 100dvh;
+  min-height: 0;
+}
+
+/** 竖屏强制横屏：尺寸跟随旋转壳层，不用 dvh/vmin（会与物理视口不一致） */
+html.landscape-forced[data-touch="1"][data-phase="game"] {
+  --joy-size: clamp(156px, calc(var(--forced-h, 100vw) * 0.64), 299px);
+  --joy-knob: calc(var(--joy-size) * 0.38);
+  --act-main: clamp(77px, calc(var(--forced-h, 100vw) * 0.24), 139px);
+  --act-sub: clamp(64px, calc(var(--forced-h, 100vw) * 0.2), 117px);
+  --touch-bar-h: 32px;
+  --touch-hud-h: 36px;
+  --joy-inset-x: 0px;
+  --joy-inset-y: 4px;
+  --act-inset-x: 12px;
+  --act-inset-y: 4px;
+  --act-gap: 12px;
+  --touch-cluster-gap: 20px;
+}
+
+html.landscape-forced[data-touch="1"][data-phase="game"] .game-root {
+  grid-template-rows: var(--touch-bar-h) 1fr var(--touch-hud-h);
+}
+
+html.landscape-forced[data-touch="1"][data-phase="game"] .bottom-hud {
+  padding-bottom: 2px;
 }
 
 html[data-touch="1"][data-phase="game"] .top-bar {
@@ -231,25 +279,35 @@ html[data-touch="1"][data-phase="game"] .joy-knob {
 }
 
 html[data-touch="1"][data-phase="game"] .touch-left {
-  left: max(calc(var(--safe-l) + var(--joy-inset-x)), var(--joy-inset-x));
+  left: max(var(--safe-l), var(--joy-inset-x));
   bottom: max(calc(var(--joy-inset-y) + var(--safe-b)), var(--joy-inset-y));
 }
 
 html[data-touch="1"][data-phase="game"] .touch-right {
-  right: max(calc(var(--safe-r) + var(--act-inset-x)), var(--act-inset-x));
+  right: max(
+    calc(var(--safe-r) + var(--act-inset-x) + var(--touch-shift-x)),
+    calc(var(--act-inset-x) + var(--touch-shift-x))
+  );
   bottom: max(calc(var(--act-inset-y) + var(--safe-b)), var(--act-inset-y));
+  gap: var(--touch-cluster-gap);
 }
 
 html[data-touch="1"][data-phase="game"] .touch-actions {
-  grid-template-columns: var(--act-sub) var(--act-main);
+  grid-template-columns: var(--act-main) var(--act-main);
   grid-template-rows: var(--act-sub) var(--act-main);
-  gap: 6px;
+  gap: var(--act-gap);
 }
 
-html[data-touch="1"][data-phase="game"] .act-btn.slide,
 html[data-touch="1"][data-phase="game"] .act-btn.ult {
   width: var(--act-sub);
   height: var(--act-sub);
+}
+
+html[data-touch="1"][data-phase="game"] .act-btn.slide {
+  width: var(--act-main);
+  height: var(--act-main);
+  background: rgba(40, 56, 80, 0.32);
+  border-color: rgba(106, 128, 152, 0.4);
 }
 
 html[data-touch="1"][data-phase="game"] .act-btn.attack {
@@ -258,11 +316,6 @@ html[data-touch="1"][data-phase="game"] .act-btn.attack {
   background: linear-gradient(145deg, rgba(62, 207, 136, 0.5), rgba(26, 122, 72, 0.42));
   border-color: rgba(126, 240, 176, 0.45);
   box-shadow: none;
-}
-
-html[data-touch="1"][data-phase="game"] .act-btn.slide {
-  background: rgba(40, 56, 80, 0.32);
-  border-color: rgba(106, 128, 152, 0.4);
 }
 
 html[data-touch="1"][data-phase="game"] .act-btn.ult {
@@ -277,11 +330,11 @@ html[data-touch="1"][data-phase="game"] .act-btn.ult.ready {
 }
 
 html[data-touch="1"][data-phase="game"] .act-icon {
-  font-size: clamp(22px, 5vmin, 32px);
+  font-size: clamp(19px, 4vmin, 29px);
 }
 
 html[data-touch="1"][data-phase="game"] .act-label {
-  font-size: clamp(10px, 2.2vmin, 13px);
+  font-size: clamp(8px, 1.9vmin, 11px);
 }
 
 html[data-touch="1"][data-phase="game"] .touch-hint {
@@ -289,7 +342,8 @@ html[data-touch="1"][data-phase="game"] .touch-hint {
 }
 
 html[data-touch="1"][data-phase="game"] .touch-weapons {
-  max-width: calc(var(--act-main) + var(--act-sub) + 20px);
+  max-width: calc(var(--act-main) * 2 + var(--act-gap) + 24px);
+  gap: var(--act-gap);
 }
 
 html[data-touch="1"][data-phase="game"] .touch-chip {
@@ -346,6 +400,46 @@ html[data-touch="1"] .overlay.result .result-hint {
 
 html[data-touch="1"] .overlay.result .result-stats dd {
   font-size: 14px;
+}
+
+html[data-touch="1"] .overlay.result .result-actions--desktop {
+  display: none;
+}
+
+html[data-touch="1"] .overlay.pause .pause-touch-latency {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #a8b8c8;
+}
+
+html[data-touch="1"] .overlay.pause .pause-touch-latency button {
+  min-width: 40px;
+  min-height: 36px;
+  padding: 4px 10px;
+}
+
+html[data-touch="1"] .reward-reveal-backdrop {
+  z-index: 130;
+}
+
+html[data-touch="1"] .guide-spotlight-layer {
+  z-index: 125;
+}
+
+html[data-touch="1"][data-phase="game"] body {
+  overscroll-behavior: none;
+}
+
+html[data-touch="1"][data-landscape-ready="0"][data-phase="game"] .playfield {
+  pointer-events: none;
+}
+
+html[data-touch="1"][data-landscape-ready="0"][data-phase="game"] .landscape-prompt {
+  pointer-events: auto;
 }
 
 html[data-touch="1"] .overlay.result .result-actions button {
