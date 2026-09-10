@@ -1,4 +1,7 @@
 import { BOSS_RADIUS, MEGABOSS_RADIUS, MINION_RADIUS } from "./constants";
+import type { BeatSkillTier } from "./beatSkill";
+
+export type { BeatSkillTier };
 
 export type TrackId = 1 | 2 | 3;
 export type LevelId = 1 | 2;
@@ -89,6 +92,12 @@ export interface Enemy extends Circle {
   lungeFromY?: number;
   lungeToX?: number;
   lungeToY?: number;
+  /** >now：眩晕，冻结移动与攻击。 */
+  stunUntilMs?: number;
+  /** >now：减速中。 */
+  slowUntilMs?: number;
+  /** 减速倍率（如寒冰 0.3）。 */
+  slowFactor?: number;
 }
 
 export interface Bullet extends Circle {
@@ -106,6 +115,59 @@ export interface Bullet extends Circle {
   fromClone: boolean;
   hitIds: Set<number>;
   active: boolean;
+  /** 武士剑气等穿透弹。 */
+  pierce?: boolean;
+  /** 可视化/碰撞样式。 */
+  style?: "normal" | "swordWave" | "iceArrow" | "lightningBolt";
+  /** 延迟激活（剑气分段从身上依次发出）。 */
+  wakeAtMs?: number;
+}
+
+/** 弓使雷电箭命中后外扩的带电波。 */
+export interface ShockWave {
+  id: number;
+  x: number;
+  y: number;
+  /** 当前半径。 */
+  radius: number;
+  maxRadius: number;
+  speed: number;
+  damage: number;
+  hitIds: Set<number>;
+  active: boolean;
+}
+
+/** 武士重节拍环绕飞剑（护盾：1 剑挡 1 血）。 */
+export interface OrbitSword extends Circle {
+  id: number;
+  angle: number;
+  omega: number;
+  orbitR: number;
+  untilMs: number;
+  damage: number;
+  lastHitMs: Map<number, number>;
+}
+
+/** 武士大招矮龙卷：寻敌飞行，撞敌后驻留；持续伤害按自旋每圈结算。 */
+export interface SwordTornado extends Circle {
+  id: number;
+  ux: number;
+  uy: number;
+  traveled: number;
+  maxRange: number;
+  seeking: boolean;
+  /** 驻留结束时刻；寻敌中为 0。 */
+  untilMs: number;
+  lastTickMs: number;
+  impactDone: boolean;
+  active: boolean;
+}
+
+/** 剑气命中消散特效。 */
+export interface SwordWavePopFx {
+  untilMs: number;
+  x: number;
+  y: number;
 }
 
 export interface PropBreakFx {
@@ -120,6 +182,8 @@ export interface ExplosionFx {
   x: number;
   y: number;
   radius: number;
+  /** 卡拍爆裂箭等强化爆炸。 */
+  enhanced?: boolean;
 }
 
 export interface Clone extends Circle {
@@ -141,6 +205,8 @@ export interface AttackFlash {
   onBeat: boolean;
   path: Circle[] | null;
   arcDeg?: number;
+  /** 轻节拍挥刀/突刺星屑。 */
+  sparkle?: boolean;
 }
 
 export interface Player extends Circle {
@@ -181,6 +247,14 @@ export interface Sim {
   shieldHp: number;
   explosions: ExplosionFx[];
   flash: AttackFlash | null;
+  /** 武士环绕飞剑（可叠加）。 */
+  orbitSwords: OrbitSword[];
+  /** 武士大招矮龙卷。 */
+  tornados: SwordTornado[];
+  /** 剑气命中消散。 */
+  swordWavePops: SwordWavePopFx[];
+  /** 弓使大招带电波。 */
+  shockWaves: ShockWave[];
   nextId: number;
   spawnX: number;
   spawnY: number;
@@ -189,6 +263,10 @@ export interface Sim {
   damagePopups: DamagePopup[];
   /** 本局是否还能看广告复活（每局一次）。 */
   reviveAvailable: boolean;
+  /** 复活冻结倒计时结束时刻；> nowMs 时世界暂停。 */
+  reviveHoldUntilMs: number;
+  /** 复活无敌结束时刻（含倒计时 + 之后 1s）。 */
+  reviveGraceUntilMs: number;
   knockVX: number;
   knockVY: number;
 }
@@ -197,13 +275,21 @@ export type BeatCue = {
   phase01: number;
   /** 金环亮区 */
   inZone: boolean;
-  /** 银环预警（金环前 0.3s） */
+  /** 银环预警（金环前，仅提示） */
   inSilverZone: boolean;
-  /** 强普判定区（银环起至金环结束） */
+  /** 强普判定区（仅金环） */
   inCombatZone: boolean;
   proximity: number;
   windowFrac: number;
   silverPreFrac: number;
+  /** 角色圆环进度条用 */
+  timelineMs: number;
+  periodMs: number;
+  loopMs: number;
+  beatTimesMs: readonly number[];
+  beatWindowMs: number;
+  /** 普攻/滑步在时间轴上的打点痕迹（随窗口滚动刷新）。 */
+  inputMarks: readonly { absMs: number; onBeat: boolean }[];
 };
 
 export interface HudSnapshot {
@@ -231,11 +317,22 @@ export interface HudSnapshot {
   windowFrac: number;
   silverPreFrac: number;
   beatCount: number;
+  /** 音频时间轴（含 latency 校正），供顶端节拍进度条。 */
+  timelineMs: number;
+  loopMs: number;
+  /** 与判定时钟同源的拍点表（同引用，勿每帧拷贝）。 */
+  beatTimesMs: readonly number[];
+  /** 与拍点一一对应的技能分档（武士进度条配色）。 */
+  beatSkillTiers: readonly BeatSkillTier[];
+  /** 普攻/滑步打点痕迹。 */
+  inputMarks: readonly { absMs: number; onBeat: boolean }[];
   ultReady: boolean;
   ultBuffRemainingMs: number;
   spearUltAttacksLeft: number;
   spearAtkSpeedStacks: number;
   shieldHp: number;
+  /** 武士环绕飞剑数量。 */
+  orbitSwordCount: number;
   latencyMs: number;
   muted: boolean;
   onBeatFlash: boolean;
@@ -243,6 +340,10 @@ export interface HudSnapshot {
   combo: number;
   maxCombo: number;
   reviveAvailable: boolean;
+  /** 复活冻结剩余毫秒；0 表示未在倒计时。 */
+  reviveHoldMs: number;
+  /** 复活无敌剩余毫秒。 */
+  reviveGraceMs: number;
   runResult: RunResult | null;
 }
 
@@ -252,8 +353,12 @@ export interface MusicProfile {
   composer: string;
   bpmLabel: number;
   beatTimesMs: readonly number[];
+  /** 与 beatTimesMs 对齐的武士技能分档。 */
+  beatSkillTiers?: readonly BeatSkillTier[];
   loopMs: number;
   loopBeats: number;
+  /** 额外规律脉冲周期（0.67s～1s）；HUD 节拍条比例优先用它。 */
+  pulsePeriodMs?: number;
   melodyNotes?: readonly (readonly [midi: number, startBeat: number, durBeats: number])[];
   bassNotes?: readonly (readonly [midi: number, startBeat: number, durBeats: number])[];
   style?: "gentle" | "march" | "dance" | "rhapsody";

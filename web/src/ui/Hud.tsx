@@ -1,4 +1,11 @@
 import type { HudSnapshot, RunResult } from "../game/types";
+import {
+  beatMarkHot,
+  beatTimelineView,
+  BEAT_TIMELINE_WINDOW_MS,
+  visibleBeatMarks,
+} from "../game/beatTimeline";
+import { BEAT_WINDOW_MS } from "../game/constants";
 import { LEVELS } from "../game/levels";
 import { formatStars } from "../game/runResult";
 import { TRACKS, HEROES } from "../game/tracks";
@@ -78,10 +85,9 @@ export function TopBar(props: HudHandlers) {
       {h.spearUltAttacksLeft > 0 && h.weaponId === 2 && (
         <span className="hud-tag hud-tag--spear">游龙 ×{h.spearUltAttacksLeft}</span>
       )}
-      {h.ultBuffRemainingMs > 0 && h.weaponId === 1 && (
-        <span className="hud-tag hud-tag--samurai">狂暴 {Math.ceil(h.ultBuffRemainingMs / 1000)}s</span>
+      {h.weaponId === 1 && h.orbitSwordCount > 0 && (
+        <span className="hud-tag hud-tag--shield">飞剑 ×{h.orbitSwordCount}</span>
       )}
-      {h.shieldHp > 0 && <span className="hud-tag hud-tag--shield">盾 {h.shieldHp}</span>}
       {props.touch &&
         (props.portrait || props.landscapeForced) &&
         props.onEnableLandscape &&
@@ -96,6 +102,65 @@ export function TopBar(props: HudHandlers) {
         )}
       </div>
     </header>
+  );
+}
+
+/** 战斗顶端节拍进度条：过中点后游标钉住，拍点随时间左移。 */
+export function BeatTimelineBar({ hud }: { hud: HudSnapshot }) {
+  const windowMs = BEAT_TIMELINE_WINDOW_MS;
+  const { scrollLeftMs, playheadFrac } = beatTimelineView(hud.timelineMs, windowMs);
+  const showSkillColors = hud.weaponId === 1 || hud.weaponId === 3;
+  const marks = visibleBeatMarks(
+    hud.beatTimesMs,
+    hud.loopMs,
+    scrollLeftMs,
+    windowMs,
+    undefined,
+    showSkillColors ? hud.beatSkillTiers : undefined,
+  );
+  const zoneFrac = BEAT_WINDOW_MS / windowMs;
+  return (
+    <div
+      className={`beat-timeline${hud.inZone ? " beat-timeline--zone" : ""}`}
+      aria-hidden
+    >
+      <div className="beat-timeline__past" style={{ width: `${playheadFrac * 100}%` }} />
+      <div className="beat-timeline__track">
+        {marks.map((m) => {
+          const left = m.frac - zoneFrac / 2;
+          const right = m.frac + zoneFrac / 2;
+          if (right < -0.02 || left > 1.02) return null;
+          const hot = beatMarkHot(m.absMs, hud.timelineMs);
+          const tierClass =
+            m.tier === "light"
+              ? " is-skill-light"
+              : m.tier === "mid"
+                ? " is-skill-mid"
+                : m.tier === "heavy"
+                  ? " is-skill-heavy"
+                  : "";
+          return (
+            <span
+              key={m.absMs}
+              className={`beat-timeline__beat${hot ? " is-hot" : ""}${tierClass}`}
+              style={{ left: `${left * 100}%`, width: `${zoneFrac * 100}%` }}
+            />
+          );
+        })}
+        {hud.inputMarks.map((hit) => {
+          const frac = (hit.absMs - scrollLeftMs) / windowMs;
+          if (frac < -0.02 || frac > 1.02) return null;
+          return (
+            <span
+              key={`hit-${hit.absMs}`}
+              className={`beat-timeline__hit${hit.onBeat ? " is-onbeat" : ""}`}
+              style={{ left: `${frac * 100}%` }}
+            />
+          );
+        })}
+      </div>
+      <div className="beat-timeline__playhead" style={{ left: `${playheadFrac * 100}%` }} />
+    </div>
   );
 }
 
@@ -125,7 +190,7 @@ export function BottomHud(props: HudHandlers) {
       </div>
       <div
         className={`beat-bar ${h.inZone ? "hot" : h.inSilverZone ? "silver" : warm ? "warm" : ""}`}
-        title={`${h.beatCount} 个卡拍节点 · 银环预警 0.3s · 延迟 ${Math.round(h.latencyMs)}ms`}
+        title={`${h.beatCount} 个卡拍节点 · 银环预警 · 金环强普 · 延迟 ${Math.round(h.latencyMs)}ms`}
       >
         <span className="beat-zone-silver left" style={{ width: silverW }} />
         <span className="beat-zone-silver right" style={{ width: silverW }} />
@@ -169,26 +234,46 @@ export function BottomHud(props: HudHandlers) {
       </span>
       {!props.touch && (h.run === "win" || h.run === "lose") && (
         <>
-          <button className="primary" onClick={props.onRestart}>
+          {h.run === "lose" && h.reviveAvailable && (
+            <button className="primary" type="button" onClick={() => props.onWatchReviveAd?.()}>
+              复活
+            </button>
+          )}
+          <button
+            className={h.run === "lose" && h.reviveAvailable ? undefined : "primary"}
+            type="button"
+            onClick={() => {
+              if (h.run === "lose" && h.reviveAvailable) props.onForfeitRevive?.();
+              props.onRestart?.();
+            }}
+          >
             重开 R
           </button>
-          <button onClick={props.onReselect}>重选 S</button>
+          <button
+            type="button"
+            onClick={() => {
+              if (h.run === "lose" && h.reviveAvailable) props.onForfeitRevive?.();
+              props.onReselect?.();
+            }}
+          >
+            回选曲 S
+          </button>
         </>
       )}
       {props.touch && (h.run === "win" || h.run === "lose") && (
         <div className="touch-result-bar">
-          {h.run === "lose" && h.reviveAvailable ? (
+          {h.run === "lose" ? (
             <>
-              <button className="primary" type="button" onClick={() => props.onWatchReviveAd?.()}>
-                看广告复活
-              </button>
-              <button type="button" onClick={() => props.onForfeitRevive?.()}>
-                放弃
-              </button>
+              {h.reviveAvailable && (
+                <button className="primary" type="button" onClick={() => props.onWatchReviveAd?.()}>
+                  复活
+                </button>
+              )}
               <button
                 type="button"
+                className={h.reviveAvailable ? undefined : "primary"}
                 onClick={() => {
-                  props.onForfeitRevive?.();
+                  if (h.reviveAvailable) props.onForfeitRevive?.();
                   props.onRestart?.();
                 }}
               >
@@ -197,14 +282,14 @@ export function BottomHud(props: HudHandlers) {
               <button
                 type="button"
                 onClick={() => {
-                  props.onForfeitRevive?.();
+                  if (h.reviveAvailable) props.onForfeitRevive?.();
                   props.onReselect?.();
                 }}
               >
                 回选曲
               </button>
             </>
-          ) : h.run === "win" ? (
+          ) : (
             <>
               {h.levelId === 2 ? (
                 <>
@@ -249,15 +334,6 @@ export function BottomHud(props: HudHandlers) {
                 </>
               )}
             </>
-          ) : (
-            <>
-              <button type="button" onClick={props.onRestart}>
-                重开
-              </button>
-              <button type="button" onClick={props.onReselect}>
-                回选曲
-              </button>
-            </>
           )}
         </div>
       )}
@@ -284,6 +360,18 @@ export function FieldOverlay(props: {
   shareHint?: string | null;
 }) {
   const h = props.hud;
+  if (h.reviveHoldMs > 0 && h.run === "playing") {
+    const sec = Math.max(1, Math.ceil(h.reviveHoldMs / 1000));
+    return (
+      <div className="overlay revive-countdown" role="status" aria-live="polite">
+        <div className="revive-countdown-card">
+          <p className="revive-countdown-lede">复活成功</p>
+          <div className="revive-countdown-num">{sec}</div>
+          <p className="revive-countdown-sub">稍后继续 · 开场 1 秒无敌</p>
+        </div>
+      </div>
+    );
+  }
   if (h.paused && h.run !== "win" && h.run !== "lose") {
     return (
       <div className="overlay pause result-panel">
@@ -320,13 +408,13 @@ export function FieldOverlay(props: {
           {props.touch ? (
             <>
               <div>左下摇杆 · 右下普攻/滑步/大招 · 顶栏「实战」开打</div>
-              <div>卡拍 = 节拍条亮区出手，伤害更高。</div>
+              <div>卡拍 = 节拍条金环亮区出手，伤害更高；银环只是预警。</div>
             </>
           ) : (
             <>
               <div>WASD 移动 · Enter 普攻 · Shift 滑步 · 空格大招 · P 暂停 · Q 结束</div>
-              <div>节拍条亮区普攻 = 卡拍强普（伤害 ×2 等），无视 0.13s 动作 CD，CD 中也可打出；每拍限一次强普。滑步另有独立卡拍槽。</div>
-              <div>武士长刀绕身一圈，枪客 45° 挥枪（卡拍 90°），弓使射锁敌箭。打中丧尸身体才算命中。空挥不充能。卡拍命中 10 次放角色大招。</div>
+              <div>节拍条金环亮区普攻 = 卡拍强普（伤害 3），无视动作 CD；银环仅预警不算强普。每拍限一次强普。滑步另有独立卡拍槽；未卡拍滑步也会打出普通普攻。</div>
+              <div>武士长刀绕身一圈，枪客 45° 挥枪（卡拍 90°），弓使射锁敌箭。打中丧尸身体才算命中。空挥不充能。卡拍命中（普攻与节拍技能，不含大招）累计 10 次可放大招。</div>
               <div>丧尸会冲刺，尸王会读条砸地并放弹幕：红圈前摇时滑步可躲，弹幕用位移躲开。木箱/灯柱/墓碑可打碎清路。</div>
               <div>按 T 进入实战。</div>
             </>
@@ -492,36 +580,31 @@ export function FieldOverlay(props: {
           <div className="revive-card">
             {canRevive ? (
               <>
-                <p className="revive-lede">本局还有一次看广告复活机会</p>
-                <p className="revive-sub">复活后 3 HP 原地继续，歌曲与波次不变</p>
+                <p className="revive-lede">本局还可看广告复活一次</p>
+                <p className="revive-sub">复活后 3 HP，倒计时 3 秒再继续，并有 1 秒无敌</p>
               </>
             ) : (
               <>
                 <p className="revive-lede">本局复活已用尽</p>
-                <p className="revive-sub">可重开或回选曲再来</p>
+                <p className="revive-sub">可重开本关，或回选曲整备后再战</p>
               </>
             )}
           </div>
           <div className={`overlay-actions result-actions${props.touch ? " result-actions--desktop" : ""}`}>
             {canRevive && (
-              <>
-                <button className="primary" type="button" onClick={() => props.onWatchReviveAd?.()}>
-                  看广告复活
-                </button>
-                <button type="button" className="ghost" onClick={() => props.onForfeitRevive?.()}>
-                  放弃复活
-                </button>
-              </>
+              <button className="primary" type="button" onClick={() => props.onWatchReviveAd?.()}>
+                复活
+              </button>
             )}
             <button
               type="button"
-              className={canRevive ? "ghost" : "primary"}
+              className={canRevive ? undefined : "primary"}
               onClick={() => {
                 if (canRevive) props.onForfeitRevive?.();
                 props.onRestart?.();
               }}
             >
-              再来一局
+              重开
             </button>
             <button
               type="button"
@@ -534,7 +617,9 @@ export function FieldOverlay(props: {
             </button>
           </div>
           {!props.touch && (
-            <div className="status">{canRevive ? "看广告复活 · [R] 重开 · [S] 回选曲" : "[R] 重开 · [S] 回选曲"}</div>
+            <div className="status">
+              {canRevive ? "复活 · [R] 重开 · [S] 回选曲" : "[R] 重开 · [S] 回选曲"}
+            </div>
           )}
         </div>
       </>

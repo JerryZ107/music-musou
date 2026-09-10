@@ -1,4 +1,4 @@
-import { DEFAULT_AUDIO_LATENCY_MS } from "./constants";
+import { DEFAULT_AUDIO_LATENCY_MS, TRACK_BPM_SCALE } from "./constants";
 import { TRACKS } from "./tracks";
 import type { MusicProfile, TrackId } from "./types";
 
@@ -38,10 +38,6 @@ export const MENU_BGM_GAIN = GAME_BGM_GAIN;
 export const SHOP_BGM_URL = "audio/shop-bgm.mp3";
 
 export type AmbientBgmKind = "shop";
-
-const AMBIENT_BGM_URLS: Record<AmbientBgmKind, string> = {
-  shop: SHOP_BGM_URL,
-};
 
 function getAudioContextCtor(): typeof AudioContext | null {
   return (
@@ -99,8 +95,15 @@ export class TrackPlayer {
   private fileLoaded = new Set<TrackId>();
   private fileFailed = new Set<TrackId>();
   private playingId: TrackId | null = null;
+  private disposed = false;
+  /** 与 TRACK_BPM_SCALE 一致；timelineMs 按此换算音频进度。 */
+  private playbackRate = TRACK_BPM_SCALE;
+  /** 递增以作废进行中的 play()，防止并发叠轨。 */
+  private playEpoch = 0;
+  private playTail: Promise<void> = Promise.resolve();
 
   async unlock(): Promise<void> {
+    if (this.disposed) return;
     const ctx = this.ensure();
     if (ctx.state === "suspended") await ctx.resume();
   }
@@ -136,34 +139,97 @@ export class TrackPlayer {
     return buildSynthBuffer(ctx, trackId);
   }
 
-  async play(trackId: TrackId): Promise<void> {
-    const ctx = this.ensure();
-    if (ctx.state === "suspended") await ctx.resume();
-    if (!this.buffers.has(trackId)) {
-      this.buffers.set(trackId, await this.loadBuffer(ctx, trackId));
-    }
-    this.stop();
-    const src = ctx.createBufferSource();
-    src.buffer = this.buffers.get(trackId)!;
-    src.loop = true;
-    src.connect(this.gain!);
-    this.startAt = ctx.currentTime;
-    src.start(0);
-    this.source = src;
-    this.playingId = trackId;
+  /** 是否已在播，或正在加载/启动中（避免重复 kick）。 */
+  get isBusy(): boolean {
+    return this.playingId !== null || this._starting;
   }
 
-  stop(): void {
+  private _starting = false;
+
+  async play(trackId: TrackId): Promise<void> {
+    if (this.disposed) return;
+    const epoch = ++this.playEpoch;
+    this._starting = true;
+    const job = async () => {
+      if (this.disposed || epoch !== this.playEpoch) return;
+      try {
+        const ctx = this.ensure();
+        if (ctx.state === "suspended") await ctx.resume();
+        if (this.disposed || epoch !== this.playEpoch) return;
+
+        if (!this.buffers.has(trackId)) {
+          const buf = await this.loadBuffer(ctx, trackId);
+          if (this.disposed || epoch !== this.playEpoch) return;
+          this.buffers.set(trackId, buf);
+        }
+
+        this.stopSourceOnly();
+        if (this.disposed || epoch !== this.playEpoch) return;
+
+        const src = ctx.createBufferSource();
+        src.buffer = this.buffers.get(trackId)!;
+        src.loop = true;
+        // 与 timelineMs 共用 playbackRate，保证「听到的位置 === 判定时间轴」
+        const rate = this.playbackRate;
+        src.playbackRate.setValueAtTime(rate, ctx.currentTime);
+        src.connect(this.gain!);
+        this.startAt = ctx.currentTime;
+        src.start(0);
+        if (this.disposed || epoch !== this.playEpoch) {
+          try {
+            src.stop();
+          } catch {
+            /* ignore */
+          }
+          src.disconnect();
+          return;
+        }
+        this.source = src;
+        this.playingId = trackId;
+      } finally {
+        if (epoch === this.playEpoch) this._starting = false;
+      }
+    };
+
+    this.playTail = this.playTail.then(job, job);
+    return this.playTail;
+  }
+
+  /** 只停当前 source，不提升 epoch（供 play 内部换轨）。 */
+  private stopSourceOnly(): void {
     if (this.source) {
       try {
         this.source.stop();
       } catch {
         /* already stopped */
       }
-      this.source.disconnect();
+      try {
+        this.source.disconnect();
+      } catch {
+        /* ignore */
+      }
       this.source = null;
     }
     this.playingId = null;
+  }
+
+  stop(): void {
+    this.playEpoch += 1;
+    this._starting = false;
+    this.stopSourceOnly();
+  }
+
+  /** 退出战斗时彻底关闭，杜绝迟到的 play() 再出声。 */
+  dispose(): void {
+    this.disposed = true;
+    this.stop();
+    const ctx = this.ctx;
+    this.ctx = null;
+    this.gain = null;
+    this.buffers.clear();
+    if (ctx) {
+      void ctx.close().catch(() => {});
+    }
   }
 
   setMuted(muted: boolean): void {
@@ -182,13 +248,16 @@ export class TrackPlayer {
   }
 
   async resume(): Promise<void> {
+    if (this.disposed) return;
     const ctx = this.ctx;
     if (ctx && ctx.state === "suspended") await ctx.resume();
   }
 
   timelineMs(fallbackMs: number): number {
     if (!this.ctx || !this.source) return fallbackMs;
-    return Math.max(0, (this.ctx.currentTime - this.startAt) * 1000 - this.latencyMs);
+    // 缓冲时间轴（ms）= 上下文流逝 × playbackRate；必须与拍点 JSON（文件时间）同坐标系
+    const rate = this.source.playbackRate.value || this.playbackRate;
+    return Math.max(0, (this.ctx.currentTime - this.startAt) * rate * 1000 - this.latencyMs);
   }
 
   /** 已解码录音的实际时长（毫秒），用于与拍点对齐。 */
@@ -206,51 +275,40 @@ export class TrackPlayer {
   }
 }
 
-/** 商店循环曲；进入商店时播放，离开即停。 */
+/** 商店循环曲；进入商店时播放，离开即停（HTMLAudio，避免 WebAudio 手势断链 / 大文件解码失败）。 */
 export class MenuBgmPlayer {
-  private ctx: AudioContext | null = null;
-  private gain: GainNode | null = null;
-  private source: AudioBufferSourceNode | null = null;
-  private buffers = new Map<AmbientBgmKind, AudioBuffer>();
-  private failed = new Set<AmbientBgmKind>();
-  private wantKind: AmbientBgmKind | null = null;
-  private playingKind: AmbientBgmKind | null = null;
+  private audio: HTMLAudioElement | null = null;
+  private wantPlay = false;
   private starting: Promise<void> | null = null;
 
-  private ensure(): AudioContext | null {
-    if (this.ctx) return this.ctx;
-    const Ctx = getAudioContextCtor();
-    if (!Ctx) return null;
-    // 优先接手势里预热过的 context，刷新后点一下即可出声
-    this.ctx = takePrimedAudioContext() ?? new Ctx();
-    this.gain = this.ctx.createGain();
-    this.gain.gain.value = MENU_BGM_GAIN;
-    this.gain.connect(this.ctx.destination);
-    return this.ctx;
+  private ensure(): HTMLAudioElement {
+    if (this.audio) return this.audio;
+    const el = new Audio(resolveAudioAsset(SHOP_BGM_URL));
+    el.loop = true;
+    el.preload = "auto";
+    el.volume = MENU_BGM_GAIN;
+    this.audio = el;
+    return el;
   }
 
-  private async resumeCtx(): Promise<boolean> {
-    const ctx = this.ensure();
-    if (!ctx) return false;
-    if (ctx.state === "suspended") {
-      try {
-        await ctx.resume();
-      } catch {
-        return false;
-      }
+  /** 必须在点击/触摸的同步阶段调用，解锁自动播放。 */
+  unlockFromGesture(): void {
+    this.wantPlay = true;
+    const el = this.ensure();
+    const p = el.play();
+    if (p && typeof p.then === "function") {
+      void p
+        .then(() => {
+          if (!this.wantPlay) el.pause();
+        })
+        .catch(() => {
+          /* 等 start 再试 */
+        });
     }
-    return ctx.state === "running";
   }
 
-  async start(kind: AmbientBgmKind = "shop"): Promise<void> {
-    this.wantKind = kind;
-    const running = await this.resumeCtx();
-    if (this.playingKind === kind && this.source && running) return;
-    // 挂起时创建的 source 可能无声，清掉后等 running 再播
-    if (this.source && !running) {
-      this.stopSource();
-    }
-    if (this.playingKind === kind && this.source) return;
+  async start(_kind: AmbientBgmKind = "shop"): Promise<void> {
+    this.wantPlay = true;
     if (this.starting) return this.starting;
     this.starting = this.startInner().finally(() => {
       this.starting = null;
@@ -258,68 +316,35 @@ export class MenuBgmPlayer {
     return this.starting;
   }
 
-  private stopSource(): void {
-    if (this.source) {
-      try {
-        this.source.stop();
-      } catch {
-        /* already stopped */
-      }
-      this.source.disconnect();
-      this.source = null;
-    }
-    this.playingKind = null;
-  }
-
   private async startInner(): Promise<void> {
-    const ctx = this.ensure();
-    if (!ctx || !this.gain) return;
-    if (!(await this.resumeCtx())) return;
-
-    while (this.wantKind && this.wantKind !== this.playingKind) {
-      const kind = this.wantKind;
-      if (!this.buffers.has(kind) && !this.failed.has(kind)) {
-        const buf = await fetchAudioBuffer(ctx, AMBIENT_BGM_URLS[kind]);
-        if (!buf) {
-          this.failed.add(kind);
-          return;
-        }
-        this.buffers.set(kind, buf);
-      }
-      if (!(await this.resumeCtx())) return;
-      if (this.wantKind !== kind) continue;
-      const buffer = this.buffers.get(kind);
-      if (!buffer) return;
-      this.stopSource();
-      if (this.wantKind !== kind) continue;
-      const src = ctx.createBufferSource();
-      src.buffer = buffer;
-      src.loop = true;
-      src.connect(this.gain);
-      src.start(0);
-      this.source = src;
-      this.playingKind = kind;
+    if (!this.wantPlay) return;
+    const el = this.ensure();
+    el.volume = MENU_BGM_GAIN;
+    if (!el.paused && !el.ended) return;
+    try {
+      el.currentTime = 0;
+      await el.play();
+    } catch {
+      /* 无手势时失败；等下次 kick */
     }
   }
 
   stop(): void {
-    this.wantKind = null;
-    this.stopSource();
+    this.wantPlay = false;
+    const el = this.audio;
+    if (!el) return;
+    try {
+      el.pause();
+      el.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
   }
 
-  /** 用户手势后强制 resume 并续播（刷新后必须点一下）。 */
+  /** 用户手势后强制续播。 */
   kickFromGesture(): void {
-    if (!this.wantKind) return;
-    const kind = this.wantKind;
-    void (async () => {
-      const wasSuspended = !this.ctx || this.ctx.state !== "running";
-      const running = await this.resumeCtx();
-      if (!running) return;
-      // 刷新后挂起期间拉起的 source 常常无声，解锁后重建
-      if (wasSuspended && this.source) {
-        this.stopSource();
-      }
-      await this.start(kind);
-    })();
+    if (!this.wantPlay) return;
+    this.unlockFromGesture();
+    void this.start("shop");
   }
 }

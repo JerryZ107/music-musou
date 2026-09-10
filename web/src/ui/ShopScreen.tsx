@@ -6,13 +6,20 @@ import { HEROES } from "../game/tracks";
 import type { HeroId } from "../game/types";
 import type { FirstClearGuideStep } from "../game/onboarding";
 import { guideStepLabel, isFirstClearGuideActive, isShopGuideStep } from "../game/onboarding";
-import { HeroPortrait, MenuHeader, MenuScreen, SectionTitle } from "./MenuChrome";
 import { GuideSpotlight } from "./GuideSpotlight";
+import { LandscapeModeToggle } from "./LandscapeModeToggle";
+import { HeroPortrait, MenuHeader, MenuScreen, SectionTitle } from "./MenuChrome";
 
 export function ShopScreen(props: {
   accountName: string;
   slotIndex: number;
   meta: AccountMeta;
+  landscape?: {
+    landscapeForced: boolean;
+    portrait: boolean;
+    onEnableLandscape: () => void;
+    onDisableLandscape: () => void;
+  } | null;
   highlightArcher?: boolean;
   firstClearGuideStep?: FirstClearGuideStep | null;
   onGuideAdvance?: () => void;
@@ -35,7 +42,7 @@ export function ShopScreen(props: {
     }
     props.onMetaChange();
     props.onHeroPurchased?.(heroId);
-    setMessage(`已招募 ${HEROES[heroId].name}${guideStep === "shop_buy" && heroId === 3 ? "，请点击返回装备" : ""}`);
+    setMessage(`已招募 ${HEROES[heroId].name}${guideStep === "shop_buy" && heroId === 3 ? "，请点击返回继续整备" : ""}`);
   };
 
   return (
@@ -45,14 +52,25 @@ export function ShopScreen(props: {
         subtitle="过关所得金币，在此扩充编队"
         gold={props.meta.gold}
         actions={
-          <button
-            type="button"
-            className="ghost nav-btn"
-            data-guide="shop-back"
-            onClick={() => props.onBack()}
-          >
-            返回装备
-          </button>
+          <>
+            {props.landscape && (
+              <LandscapeModeToggle
+                active={props.landscape.landscapeForced}
+                portrait={props.landscape.portrait}
+                variant="nav"
+                onEnable={props.landscape.onEnableLandscape}
+                onDisable={props.landscape.onDisableLandscape}
+              />
+            )}
+            <button
+              type="button"
+              className="ghost nav-btn"
+              data-guide="shop-back"
+              onClick={() => props.onBack()}
+            >
+              返回装备
+            </button>
+          </>
         }
       />
       {shopGuideLive && !guideActive && (

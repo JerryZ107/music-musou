@@ -8,12 +8,15 @@ import {
   MINION_WINDUP_MS,
   SAMURAI_MODEL_SCALE,
   ARCHER_MODEL_SCALE,
+  ATTACK_RANGE,
+  SAMURAI_TORNADO_DURATION_MS,
+  SAMURAI_TORNADO_SPIN_RAD_PER_MS,
   SPEAR_ARC_DEG,
   SPEAR_MODEL_SCALE,
   WORLD_H,
   WORLD_W,
 } from "../game/constants";
-import { cameraOrigin, attackRadius, samuraiShieldActive, ultBuffActive } from "../game/sim";
+import { cameraOrigin, attackRadius, isReviveInvulnerable, ultBuffActive } from "../game/sim";
 import type { AttackFlash, BeatCue, Enemy, Sim } from "../game/types";
 import { ArtBank, SPRITE_SIZE, type HeroKey, type PropKind } from "./chibiArt";
 import { buildStageArt, type StageProp } from "./stageMap";
@@ -46,11 +49,31 @@ type ActorNode = {
 
 function flashProgress(flash: AttackFlash, nowMs: number): number {
   let dur = 120;
+  if (flash.path && flash.path.length >= 2) {
+    // 冲刺刀光：严格按 start→until，覆盖整段位移
+    const startMs = flash.startMs ?? nowMs;
+    const total = Math.max(1, flash.untilMs - startMs);
+    return Math.max(0, Math.min(1, (nowMs - startMs) / total));
+  }
   if (flash.path) dur = 160;
   else if (flash.kind === "ult" || flash.untilMs - nowMs > 125) dur = 200;
   const startMs = flash.startMs ?? flash.untilMs - dur;
   const total = Math.max(1, flash.untilMs - startMs);
   return Math.max(0, Math.min(1, (nowMs - startMs) / total));
+}
+
+/** 冲刺刀光：进度 t 时刀光中心（优先跟角色，否则起点→终点插值）。 */
+function flashTravelPoint(sim: Sim, flash: AttackFlash, t: number): { x: number; y: number } {
+  if (flash.path && flash.path.length >= 2) {
+    // 冲刺中紧跟角色，避免线性插值跟不上缓动位移
+    if (sim.nowMs < sim.slideUntil) {
+      return { x: sim.player.x, y: sim.player.y };
+    }
+    const a = flash.path[0]!;
+    const b = flash.path[flash.path.length - 1]!;
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  }
+  return { x: flash.x, y: flash.y };
 }
 
 function strokeArc(
@@ -82,6 +105,8 @@ export class WorldRenderer {
   private enemyNodes = new Map<number, ActorNode>();
   private cloneNodes = new Map<number, ActorNode>();
   private bulletGfx = new Map<number, Graphics>();
+  private orbitSwordGfx = new Map<number, Container>();
+  private tornadoGfx = new Map<number, Graphics>();
   private propSprites: Sprite[] = [];
   private obstaclePropLinks: { obstacleId: number; sprite: Sprite }[] = [];
   private destructibleSprites = new Map<number, Sprite>();
@@ -92,7 +117,10 @@ export class WorldRenderer {
   private lastEnemyPos = new Map<number, { x: number; y: number; kind: Enemy["kind"] }>();
   private puffs: { x: number; y: number; until: number }[] = [];
   private sparks: { x: number; y: number; until: number }[] = [];
+  private starBits: { x: number; y: number; vx: number; vy: number; until: number; born: number }[] = [];
+  private pinkSplats: { x: number; y: number; vx: number; vy: number; until: number; born: number; size: number }[] = [];
   private slideTrail: { x: number; y: number; until: number }[] = [];
+  private lastSparkleFlashKey = "";
   private lamps: { x: number; y: number }[] = [];
   private popupTexts = new Map<number, Text>();
   private lastPlayerX = WORLD_W / 2;
@@ -142,15 +170,18 @@ export class WorldRenderer {
     this.drawLamps(nowMs);
     this.drawGroundFx(sim);
     this.drawExplosions(sim, nowMs);
+    this.drawShockWaves(sim);
     this.syncObstacles(sim, nowMs);
     this.syncDeaths(sim, nowMs);
     this.syncEnemies(sim, nowMs);
     this.drawEnemyTelegraphs(sim, nowMs);
     this.syncClones(sim, nowMs);
     this.syncBullets(sim);
+    this.syncOrbitSwords(sim, nowMs);
+    this.syncTornados(sim, nowMs);
     this.drawPlayer(sim, nowMs);
     this.drawDamagePopups(sim, nowMs);
-    this.drawAirFx(sim, nowMs, beatCue);
+    this.drawAirFx(sim, nowMs, viewW, viewH, beatCue);
   }
 
   private drawDamagePopups(sim: Sim, nowMs: number): void {
@@ -234,53 +265,108 @@ export class WorldRenderer {
     const flash = sim.flash;
     if (!flash) return;
     if (sim.weaponId === 3 && flash.kind === "circle") return;
+    const enhanced = flash.onBeat;
+    const samuraiBlue = sim.weaponId === 1;
     const color =
       flash.kind === "line" && ultBuffActive(sim)
         ? 0xffc85a
         : flash.kind === "ult"
           ? 0xff6a3c
-          : flash.onBeat
-            ? 0xffe08a
-            : 0x9ad4ff;
+          : samuraiBlue
+            ? enhanced
+              ? 0xb8e8ff
+              : 0x7ec8ff
+            : enhanced
+              ? 0xffe08a
+              : 0x9ad4ff;
+    const hot = samuraiBlue ? (enhanced ? 0xe8f6ff : color) : enhanced ? 0xfff6c8 : color;
     const t = flashProgress(flash, sim.nowMs);
     const stamp = (x: number, y: number, r: number) => {
-      g.ellipse(x, y + 0.14, r * 0.72, r * 0.22);
-      g.fill({ color, alpha: 0.1 });
+      if (enhanced) {
+        g.ellipse(x, y + 0.14, r * 0.92, r * 0.32);
+        g.fill({
+          color: samuraiBlue ? 0x6ab4ff : 0xffb14a,
+          alpha: 0.16 * (1 - t * 0.35),
+        });
+        g.circle(x, y, r * (0.55 + t * 0.5));
+        g.stroke({ width: 0.14, color: hot, alpha: 0.42 * (1 - t * 0.5) });
+        g.circle(x, y, r * (0.28 + t * 0.35));
+        g.stroke({ width: 0.07, color: 0xffffff, alpha: 0.28 * (1 - t * 0.4) });
+      } else {
+        g.ellipse(x, y + 0.14, r * 0.72, r * 0.22);
+        g.fill({ color, alpha: 0.1 });
+      }
       const facing = Math.atan2(flash.facingY, flash.facingX);
       if (flash.kind === "line") {
         const len = r * t;
         const x1 = x + Math.cos(facing) * len;
         const y1 = y + Math.sin(facing) * len;
+        const wMain = ultBuffActive(sim) ? 0.28 : enhanced ? 0.26 : 0.16;
         g.moveTo(x, y);
         g.lineTo(x1, y1);
-        g.stroke({ width: ultBuffActive(sim) ? 0.22 : 0.16, color, alpha: 0.72, cap: "round" });
-        if (ultBuffActive(sim)) {
-          g.circle(x1, y1, 0.18 * (1 - t * 0.35));
-          g.fill({ color: 0xfff0a8, alpha: 0.55 });
+        g.stroke({ width: wMain, color, alpha: enhanced ? 0.88 : 0.72, cap: "round" });
+        if (enhanced || ultBuffActive(sim)) {
+          g.moveTo(x, y);
+          g.lineTo(x1, y1);
+          g.stroke({ width: wMain * 1.55, color: hot, alpha: 0.28, cap: "round" });
+          g.circle(x1, y1, (enhanced ? 0.28 : 0.18) * (1 - t * 0.35));
+          g.fill({ color: samuraiBlue ? 0xd8f0ff : 0xfff0a8, alpha: enhanced ? 0.72 : 0.55 });
+          if (enhanced) {
+            g.circle(x1, y1, 0.12 * (1 - t * 0.2));
+            g.fill({ color: 0xffffff, alpha: 0.85 });
+          }
         }
         g.moveTo(x + Math.cos(facing) * len * 0.15, y + Math.sin(facing) * len * 0.15);
         g.lineTo(x1, y1);
-        g.stroke({ width: 0.08, color, alpha: 0.35, cap: "round" });
+        g.stroke({ width: enhanced ? 0.12 : 0.08, color, alpha: enhanced ? 0.5 : 0.35, cap: "round" });
       } else if (flash.kind === "arc" || flash.kind === "semicircle") {
         const arcDeg = flash.arcDeg ?? (flash.kind === "semicircle" ? 180 : SPEAR_ARC_DEG);
         const arcRad = (arcDeg * Math.PI) / 180;
         const a0 = facing - (arcRad / 2) * t;
         const a1 = facing + (arcRad / 2) * t;
-        strokeArc(g, x, y, r, a0, a1, color, 0.13, 0.55);
-        strokeArc(g, x, y, r * 0.78, a0, a1, color, 0.07, 0.32);
+        if (enhanced) {
+          // 扇面填充，强普更厚实
+          g.moveTo(x, y);
+          g.arc(x, y, r * 0.96, a0, a1);
+          g.closePath();
+          g.fill({ color: 0xffb14a, alpha: 0.22 * (1 - t * 0.3) });
+          strokeArc(g, x, y, r, a0, a1, hot, 0.22, 0.82);
+          strokeArc(g, x, y, r * 0.86, a0, a1, color, 0.14, 0.62);
+          strokeArc(g, x, y, r * 0.7, a0, a1, 0xffffff, 0.08, 0.4);
+        } else {
+          strokeArc(g, x, y, r, a0, a1, color, 0.13, 0.55);
+          strokeArc(g, x, y, r * 0.78, a0, a1, color, 0.07, 0.32);
+        }
       } else if (flash.kind === "ult") {
         const spin = facing + t * Math.PI * 2 * 1.8;
         strokeArc(g, x, y, r * (0.55 + t * 0.55), spin - 1.35, spin, color, 0.18, 0.62);
         strokeArc(g, x, y, r * (0.35 + t * 0.45), spin + 0.4, spin + 2.4, color, 0.1, 0.38);
         g.circle(x, y, r * (0.2 + t * 0.35));
         g.stroke({ width: 0.1, color: 0xfff0a8, alpha: 0.45 * (1 - t * 0.4) });
+      } else if (enhanced) {
+        const spin = facing + t * Math.PI * 2;
+        g.moveTo(x, y);
+        g.arc(x, y, r * 0.95, spin - 1.45, spin + 0.15);
+        g.closePath();
+        g.fill({
+          color: samuraiBlue ? 0x5aa8ff : 0xffb14a,
+          alpha: 0.2 * (1 - t * 0.25),
+        });
+        strokeArc(g, x, y, r, spin - 1.35, spin + 0.08, hot, 0.24, 0.85);
+        strokeArc(g, x, y, r * 0.88, spin - 1.15, spin, color, 0.16, 0.7);
+        strokeArc(g, x, y, r * 0.72, spin - 0.95, spin - 0.05, 0xffffff, 0.09, 0.45);
+        g.circle(x + Math.cos(spin) * r * 0.9, y + Math.sin(spin) * r * 0.9, 0.22 * (1 - t * 0.3));
+        g.fill({ color: hot, alpha: 0.75 });
       } else {
         const spin = facing + t * Math.PI * 2;
         strokeArc(g, x, y, r, spin - 1.15, spin, color, 0.14, 0.5);
         strokeArc(g, x, y, r * 0.82, spin - 0.85, spin, color, 0.08, 0.28);
       }
     };
-    if (flash.path) {
+    if (flash.path && flash.path.length >= 2) {
+      const pos = flashTravelPoint(sim, flash, t);
+      stamp(pos.x, pos.y, flash.radius);
+    } else if (flash.path) {
       for (const p of flash.path) stamp(p.x, p.y, flash.radius);
     } else {
       stamp(flash.x, flash.y, flash.radius);
@@ -291,15 +377,59 @@ export class WorldRenderer {
     for (const ex of sim.explosions) {
       const left = ex.untilMs - nowMs;
       if (left <= 0) continue;
-      const t = 1 - left / 240;
+      const life = ex.enhanced ? 280 : 240;
+      const t = 1 - left / life;
       const g = this.groundFx;
-      const r = ex.radius * (0.35 + t * 0.85);
-      g.circle(ex.x, ex.y, r);
-      g.stroke({ width: 0.12, color: 0xff8844, alpha: 0.75 * (1 - t * 0.7) });
-      g.circle(ex.x, ex.y, r * 0.55);
-      g.fill({ color: 0xffaa44, alpha: 0.42 * (1 - t) });
-      g.circle(ex.x, ex.y - 0.08, r * 0.22);
-      g.fill({ color: 0xfff2c8, alpha: 0.65 * (1 - t) });
+      const r = ex.radius * (0.35 + t * 0.85) * (ex.enhanced ? 1.12 : 1);
+      if (ex.enhanced) {
+        g.circle(ex.x, ex.y, r * 1.15);
+        g.stroke({ width: 0.18, color: 0xffe08a, alpha: 0.55 * (1 - t * 0.65) });
+        g.circle(ex.x, ex.y, r);
+        g.stroke({ width: 0.14, color: 0xff8844, alpha: 0.85 * (1 - t * 0.7) });
+        g.circle(ex.x, ex.y, r * 0.62);
+        g.fill({ color: 0xffaa44, alpha: 0.5 * (1 - t) });
+        g.circle(ex.x, ex.y - 0.08, r * 0.3);
+        g.fill({ color: 0xfff2c8, alpha: 0.78 * (1 - t) });
+        g.circle(ex.x, ex.y - 0.1, r * 0.14);
+        g.fill({ color: 0xffffff, alpha: 0.7 * (1 - t) });
+        for (let i = 0; i < 6; i++) {
+          const ang = (i / 6) * Math.PI * 2 + t * 0.8;
+          const len = r * (0.55 + t * 0.35);
+          g.moveTo(ex.x, ex.y);
+          g.lineTo(ex.x + Math.cos(ang) * len, ex.y + Math.sin(ang) * len);
+          g.stroke({ width: 0.07, color: 0xfff0a8, alpha: 0.4 * (1 - t), cap: "round" });
+        }
+      } else {
+        g.circle(ex.x, ex.y, r);
+        g.stroke({ width: 0.12, color: 0xff8844, alpha: 0.75 * (1 - t * 0.7) });
+        g.circle(ex.x, ex.y, r * 0.55);
+        g.fill({ color: 0xffaa44, alpha: 0.42 * (1 - t) });
+        g.circle(ex.x, ex.y - 0.08, r * 0.22);
+        g.fill({ color: 0xfff2c8, alpha: 0.65 * (1 - t) });
+      }
+    }
+  }
+
+  private drawShockWaves(sim: Sim): void {
+    const g = this.groundFx;
+    for (const w of sim.shockWaves) {
+      if (!w.active || w.radius <= 0.05) continue;
+      const life = 1 - w.radius / Math.max(w.maxRadius, 1e-6);
+      const alpha = 0.25 + life * 0.45;
+      g.circle(w.x, w.y, w.radius);
+      g.stroke({ width: 0.22, color: 0xc8a8ff, alpha });
+      g.circle(w.x, w.y, w.radius * 0.92);
+      g.stroke({ width: 0.1, color: 0xfff2a8, alpha: alpha * 0.85 });
+      const jag = 10;
+      for (let i = 0; i < jag; i++) {
+        const a0 = (i / jag) * Math.PI * 2;
+        const a1 = a0 + Math.PI / jag;
+        const r0 = w.radius * 0.78;
+        const r1 = w.radius * 1.02;
+        g.moveTo(w.x + Math.cos(a0) * r0, w.y + Math.sin(a0) * r0);
+        g.lineTo(w.x + Math.cos(a1) * r1, w.y + Math.sin(a1) * r1);
+        g.stroke({ width: 0.06, color: 0xe8d4ff, alpha: alpha * 0.7, cap: "round" });
+      }
     }
   }
 
@@ -388,11 +518,28 @@ export class WorldRenderer {
     }
   }
 
+  private spawnSamuraiHitSplash(x: number, y: number, nowMs: number, count = 12): void {
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + (i % 3) * 0.27;
+      const speed = 1.6 + (i % 5) * 0.55;
+      this.pinkSplats.push({
+        x: x + Math.cos(a) * 0.08,
+        y: y - 0.15 + Math.sin(a) * 0.08,
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed - 0.8,
+        until: nowMs + 280 + (i % 4) * 35,
+        born: nowMs,
+        size: 0.07 + (i % 3) * 0.025,
+      });
+    }
+  }
+
   private syncDeaths(sim: Sim, nowMs: number): void {
     const live = new Set(sim.enemies.map((e) => e.id));
     for (const [id, pos] of this.lastEnemyPos) {
       if (!live.has(id)) {
         this.puffs.push({ x: pos.x, y: pos.y, until: nowMs + 280 });
+        if (sim.weaponId === 1) this.spawnSamuraiHitSplash(pos.x, pos.y, nowMs, 16);
         this.lastEnemyPos.delete(id);
       }
     }
@@ -440,9 +587,21 @@ export class WorldRenderer {
       if (node.lastHp != null && e.hp < node.lastHp) {
         node.flashUntil = nowMs + 180;
         this.sparks.push({ x: e.x, y: e.y, until: nowMs + 180 });
+        if (sim.weaponId === 1) this.spawnSamuraiHitSplash(e.x, e.y, nowMs);
       }
       node.lastHp = e.hp;
-      node.sprite.tint = nowMs < (node.flashUntil ?? 0) ? 0xff9a9a : isMegaboss ? 0xffe8c8 : 0xffffff;
+      const slowed = nowMs < (e.slowUntilMs ?? 0);
+      const stunned = nowMs < (e.stunUntilMs ?? 0);
+      node.sprite.tint =
+        nowMs < (node.flashUntil ?? 0)
+          ? 0xff9a9a
+          : stunned
+            ? 0xe8d4ff
+            : slowed
+              ? 0xa8d0f0
+              : isMegaboss
+                ? 0xffe8c8
+                : 0xffffff;
       node.sprite.rotation = moving ? Math.sin(nowMs * 0.02 + e.id) * 0.05 : 0;
       node.root.position.set(e.x, e.y);
       node.root.zIndex = e.y;
@@ -507,6 +666,7 @@ export class WorldRenderer {
       }
       gfx.clear();
       if (b.team === "enemy") {
+        gfx.visible = true;
         const color = 0xff4466;
         gfx.circle(0, 0, b.r * 1.1);
         gfx.fill({ color, alpha: 0.85 });
@@ -515,23 +675,71 @@ export class WorldRenderer {
         gfx.moveTo(-b.r * 1.6, 0);
         gfx.lineTo(-b.r * 0.2, 0);
         gfx.stroke({ width: 0.06, color: 0xff8899, alpha: 0.55, cap: "round" });
+      } else if (b.style === "swordWave") {
+        if (b.wakeAtMs !== undefined && sim.nowMs < b.wakeAtMs) {
+          gfx.visible = false;
+          continue;
+        }
+        gfx.visible = true;
+        const halfW = Math.min(b.r, 5);
+        const outer = halfW * 0.95;
+        const inner = halfW * 0.52;
+        // 朝飞行方向开口的蓝色半月
+        gfx.moveTo(0, -outer);
+        gfx.arc(0, 0, outer, -Math.PI / 2, Math.PI / 2);
+        gfx.arc(outer * 0.28, 0, inner, Math.PI / 2, -Math.PI / 2, true);
+        gfx.closePath();
+        gfx.fill({ color: 0x6ab8ff, alpha: 0.55 });
+        gfx.moveTo(0, -outer * 0.92);
+        gfx.arc(0, 0, outer * 0.92, -Math.PI / 2, Math.PI / 2);
+        gfx.stroke({ width: 0.18, color: 0xb8e8ff, alpha: 0.9, cap: "round" });
+        gfx.moveTo(outer * 0.05, -outer * 0.55);
+        gfx.arc(0, 0, outer * 0.72, -Math.PI / 2.4, Math.PI / 2.4);
+        gfx.stroke({ width: 0.08, color: 0xffffff, alpha: 0.75, cap: "round" });
+      } else if (b.style === "lightningBolt") {
+        gfx.visible = true;
+        const core = 0xfff2a8;
+        const edge = 0xffcc44;
+        const len = b.r * 1.15;
+        const w = b.r * 0.28;
+        gfx.moveTo(-len, 0);
+        gfx.lineTo(-len * 0.2, -w);
+        gfx.lineTo(len, 0);
+        gfx.lineTo(-len * 0.2, w);
+        gfx.closePath();
+        gfx.fill({ color: edge, alpha: 0.88 });
+        gfx.moveTo(-len * 0.85, 0);
+        gfx.lineTo(len * 0.9, 0);
+        gfx.stroke({ width: Math.max(0.12, b.r * 0.18), color: core, alpha: 0.95, cap: "round" });
+        gfx.circle(len * 0.45, 0, b.r * 0.42);
+        gfx.fill({ color: 0xffffff, alpha: 0.85 });
+        gfx.circle(0, 0, b.r * 0.55);
+        gfx.stroke({ width: 0.1, color: 0xe8d4ff, alpha: 0.55 });
       } else {
-        const blue = 0x9ad4ff;
-        const blueShaft = 0xc8e8ff;
-        const color = b.explosive ? 0xff8844 : blue;
-        const shaft = b.explosive ? 0xffc06a : blueShaft;
-        const headW = b.r * 0.32;
-        const headL = b.r * 1.55;
-        const tailL = b.r * 1.65;
+        gfx.visible = true;
+        const ice = b.style === "iceArrow";
+        const blue = ice ? 0x7ec8ff : 0x9ad4ff;
+        const blueShaft = ice ? 0xe8f8ff : 0xc8e8ff;
+        const color = ice ? 0x6ab8ff : b.explosive ? 0xff8844 : blue;
+        const shaft = ice ? blueShaft : b.explosive ? 0xffc06a : blueShaft;
+        // 普攻蓝箭更细；卡拍爆裂箭保持粗实；寒冰箭偏青白
+        const thin = !b.explosive;
+        const headW = b.r * (thin ? 0.16 : 0.32);
+        const headL = b.r * (thin ? 1.75 : 1.55);
+        const tailL = b.r * (thin ? 1.85 : 1.65);
+        const shaftH = b.r * (thin ? 0.07 : 0.2);
         gfx.moveTo(-tailL, 0);
         gfx.lineTo(headL, -headW);
-        gfx.lineTo(headL + b.r * 0.35, 0);
+        gfx.lineTo(headL + b.r * (thin ? 0.22 : 0.35), 0);
         gfx.lineTo(headL, headW);
         gfx.closePath();
         gfx.fill(color);
-        gfx.rect(-tailL, -b.r * 0.1, tailL + headL * 0.7, b.r * 0.2);
+        gfx.rect(-tailL, -shaftH * 0.5, tailL + headL * 0.7, shaftH);
         gfx.fill(shaft);
-        if (b.explosive) {
+        if (ice) {
+          gfx.circle(headL * 0.5, 0, b.r * 0.32);
+          gfx.fill({ color: 0xffffff, alpha: 0.7 });
+        } else if (b.explosive) {
           gfx.circle(headL * 0.55, 0, b.r * 0.38);
           gfx.fill({ color: 0xfff0a0, alpha: 0.75 });
         } else if (b.enhanced) {
@@ -543,6 +751,86 @@ export class WorldRenderer {
       gfx.position.set(b.x, b.y);
       gfx.zIndex = b.y + 0.2;
       gfx.rotation = Math.atan2(b.uy, b.ux);
+    }
+  }
+
+  private syncOrbitSwords(sim: Sim, nowMs: number): void {
+    const live = new Set(sim.orbitSwords.map((s) => s.id));
+    for (const [id, root] of this.orbitSwordGfx) {
+      if (!live.has(id)) {
+        root.destroy({ children: true });
+        this.orbitSwordGfx.delete(id);
+      }
+    }
+    const modelScale = SAMURAI_MODEL_SCALE;
+    // 手上武士刀尺寸的 2 倍
+    const orbitScale = modelScale * 2;
+    const grip = 0.33;
+    const localW = meleeSpriteWidth(ATTACK_RANGE, modelScale, BLADE_TIP_TEXTURE_X, grip);
+    const localH = 0.32 / modelScale;
+    for (const s of sim.orbitSwords) {
+      let root = this.orbitSwordGfx.get(s.id);
+      if (!root) {
+        root = new Container();
+        const spr = new Sprite(this.art.blade);
+        spr.anchor.set(MELEE_ANCHOR_X, 0.5);
+        spr.width = localW;
+        spr.height = localH;
+        root.addChild(spr);
+        root.scale.set(orbitScale);
+        this.orbitSwordGfx.set(s.id, root);
+        this.objects.addChild(root);
+      }
+      const spr = root.children[0] as Sprite;
+      spr.width = localW;
+      spr.height = localH;
+      const life = Math.max(0.35, Math.min(1, (s.untilMs - nowMs) / 8000));
+      const pulse = 0.9 + 0.1 * Math.sin(nowMs * 0.02 + s.id);
+      root.alpha = 0.9 * life * pulse;
+      root.position.set(s.x, s.y);
+      root.zIndex = s.y + 0.35;
+      root.rotation = s.angle + Math.PI / 2;
+      root.scale.set(orbitScale);
+    }
+  }
+
+  private syncTornados(sim: Sim, nowMs: number): void {
+    const live = new Set(sim.tornados.map((t) => t.id));
+    for (const [id, gfx] of this.tornadoGfx) {
+      if (!live.has(id)) {
+        gfx.destroy();
+        this.tornadoGfx.delete(id);
+      }
+    }
+    for (const t of sim.tornados) {
+      let gfx = this.tornadoGfx.get(t.id);
+      if (!gfx) {
+        gfx = new Graphics();
+        this.tornadoGfx.set(t.id, gfx);
+        this.objects.addChild(gfx);
+      }
+      gfx.clear();
+      const spin = nowMs * SAMURAI_TORNADO_SPIN_RAD_PER_MS + t.id;
+      const r = t.r;
+      const h = r * (t.seeking ? 0.55 : 1.15);
+      gfx.ellipse(0, 0.08, r * 1.15, r * 0.35);
+      gfx.fill({ color: 0x4a90ff, alpha: 0.22 });
+      for (let i = 0; i < 3; i++) {
+        const a0 = spin + (i / 3) * Math.PI * 2;
+        const a1 = a0 + 1.4;
+        gfx.moveTo(Math.cos(a0) * r * 0.25, -h * 0.15);
+        gfx.arc(0, -h * 0.05, r * (0.65 + i * 0.12), a0, a1);
+        gfx.stroke({ width: 0.1 + i * 0.03, color: i === 1 ? 0xe8f4ff : 0x7ec8ff, alpha: 0.75 - i * 0.12 });
+      }
+      gfx.ellipse(0, -h * 0.55, r * 0.45, r * 0.18);
+      gfx.fill({ color: 0xffffff, alpha: 0.35 });
+      if (!t.seeking) {
+        const life = Math.max(0, Math.min(1, (t.untilMs - nowMs) / SAMURAI_TORNADO_DURATION_MS));
+        gfx.circle(0, 0, r * (0.9 + (1 - life) * 0.2));
+        gfx.stroke({ width: 0.08, color: 0xb8e8ff, alpha: 0.45 * life });
+      }
+      gfx.position.set(t.x, t.y);
+      gfx.zIndex = t.y + 0.4;
     }
   }
 
@@ -576,75 +864,35 @@ export class WorldRenderer {
     this.playerPose.rotation = p.facingX < -0.12 ? -lean : lean;
     if (sliding) this.slideTrail.push({ x: p.x, y: p.y, until: nowMs + 170 });
     const hurt = nowMs - sim.lastHurtMs < 180;
+    const reviveGrace = isReviveInvulnerable(sim);
     const ultFx = sim.ultFxUntilMs > nowMs;
-    const shielded = samuraiShieldActive(sim);
     node.sprite.tint = hurt
       ? 0xff8a8a
-      : ultFx
-        ? 0xffc878
-        : shielded
-          ? 0xb8e8ff
+      : reviveGrace
+        ? 0xc8f0ff
+        : ultFx
+          ? 0xffc878
           : ultBuffActive(sim)
             ? 0xffe08a
             : 0xffffff;
+    node.sprite.alpha = reviveGrace ? (Math.floor(nowMs / 80) % 2 === 0 ? 0.55 : 0.95) : 1;
     this.syncMelee(sim);
     node.root.position.set(p.x, p.y);
     node.root.zIndex = p.y + 0.05;
   }
 
-  /** 脚下节拍环：银环预警 → 金环强拍，强普判定与银→金结束对齐。 */
-  private drawBeatCue(sim: Sim, nowMs: number, cue: BeatCue | undefined, g: Graphics): void {
-    if (!cue || (sim.run !== "playing" && sim.run !== "tutorial")) return;
-    if (!cue.inCombatZone && !cue.inZone) {
-      if (cue.proximity < 0.2) return;
-    }
-
-    const p = sim.player;
-    const py = p.y - 0.08;
-    const pulse = 0.5 + 0.5 * Math.sin(nowMs * 0.022);
-    const baseR = p.r + 0.22;
-    const innerR = baseR * 0.68;
-    const outerR = baseR + 0.28 + pulse * 0.1;
-
-    if (cue.inCombatZone) {
-      g.circle(p.x, py, innerR);
-      g.stroke({
-        width: cue.inSilverZone ? 0.12 : 0.1,
-        color: 0xd8e8f8,
-        alpha: cue.inSilverZone ? 0.75 + pulse * 0.2 : 0.55 + pulse * 0.15,
-      });
-      if (cue.inSilverZone) {
-        g.circle(p.x, py, innerR * 0.82);
-        g.stroke({ width: 0.07, color: 0xf0f8ff, alpha: 0.5 + pulse * 0.25 });
-      }
-    }
-
-    if (cue.inZone) {
-      g.circle(p.x, py, outerR);
-      g.stroke({ width: 0.1, color: 0xffe08a, alpha: 0.55 + pulse * 0.25 });
-      g.circle(p.x, py, baseR + 0.12);
-      g.stroke({ width: 0.14, color: 0xfff6c8, alpha: 0.88 });
-      for (let i = 0; i < 4; i++) {
-        const ang = (i / 4) * Math.PI * 2 + nowMs * 0.004;
-        const sx = p.x + Math.cos(ang) * (outerR + 0.12);
-        const sy = py + Math.sin(ang) * (outerR + 0.12);
-        g.circle(sx, sy, 0.07 + pulse * 0.03);
-        g.fill({ color: 0xffe08a, alpha: 0.8 });
-      }
-    }
-  }
-
-  private drawShieldAura(sim: Sim, nowMs: number, g: Graphics): void {
-    if (!samuraiShieldActive(sim)) return;
-    const p = sim.player;
-    const pulse = 0.5 + 0.5 * Math.sin(nowMs * 0.01);
-    const r = 0.62 + pulse * 0.08;
-    g.circle(p.x, p.y - 0.08, r);
-    g.stroke({ width: 0.1, color: 0x9ad4ff, alpha: 0.35 + pulse * 0.25 });
-    g.arc(p.x, p.y - 0.08, r * 0.92, nowMs * 0.004, nowMs * 0.004 + Math.PI * 1.35);
-    g.stroke({ width: 0.07, color: 0xe8f8ff, alpha: 0.45 + pulse * 0.2 });
-    g.circle(p.x, p.y - 0.22, 0.1 + pulse * 0.04);
-    g.fill({ color: 0xc8ecff, alpha: 0.55 });
+  /**
+   * 节拍进度已改回顶端条状 HUD；场景内不再画圆环。
+   */
+  private drawBeatCue(
+    _sim: Sim,
+    _nowMs: number,
+    _viewW: number,
+    _viewH: number,
+    _cue: BeatCue | undefined,
+    _g: Graphics,
+  ): void {
+    /* no-op */
   }
 
   private syncMelee(sim: Sim): void {
@@ -672,7 +920,11 @@ export class WorldRenderer {
       (blade
         ? flash.kind === "circle" || flash.kind === "ult"
         : flash.kind === "arc" || flash.kind === "semicircle" || flash.kind === "line");
-    const range = swinging ? flash!.radius : attackRadius(sim.weaponId, ultBuffActive(sim));
+    const range = blade
+      ? ATTACK_RANGE
+      : swinging
+        ? flash!.radius
+        : attackRadius(sim.weaponId, ultBuffActive(sim));
     const grip = swinging ? (blade ? 0.12 : 0.1) : blade ? 0.33 : 0.22;
     const tipX = blade ? BLADE_TIP_TEXTURE_X : SPEAR_TIP_TEXTURE_X;
     melee.width = meleeSpriteWidth(range, modelScale, tipX, grip);
@@ -752,11 +1004,10 @@ export class WorldRenderer {
     }
   }
 
-  private drawAirFx(sim: Sim, nowMs: number, beatCue?: BeatCue): void {
+  private drawAirFx(sim: Sim, nowMs: number, viewW: number, viewH: number, beatCue?: BeatCue): void {
     const g = this.airFx;
     g.clear();
-    this.drawBeatCue(sim, nowMs, beatCue, g);
-    this.drawShieldAura(sim, nowMs, g);
+    this.drawBeatCue(sim, nowMs, viewW, viewH, beatCue, g);
     if (sim.ultFxUntilMs > nowMs) {
       const t = 1 - (sim.ultFxUntilMs - nowMs) / 560;
       const p = sim.player;
@@ -790,15 +1041,92 @@ export class WorldRenderer {
       g.fill({ color: 0xffffff, alpha: 0.8 * (1 - t) });
     }
     this.sparks = this.sparks.filter((s) => nowMs < s.until);
+    for (const bit of this.pinkSplats) {
+      const life = Math.max(0, Math.min(1, (bit.until - nowMs) / Math.max(1, bit.until - bit.born)));
+      const age = (nowMs - bit.born) / 1000;
+      const x = bit.x + bit.vx * age;
+      const y = bit.y + bit.vy * age + age * age * 2.2;
+      const r = bit.size * (0.75 + (1 - life) * 0.9);
+      g.circle(x, y, r * 1.35);
+      g.fill({ color: 0x5aa8ff, alpha: 0.35 * life });
+      g.circle(x, y, r);
+      g.fill({ color: 0x9ad4ff, alpha: 0.85 * life });
+      g.circle(x, y, r * 0.45);
+      g.fill({ color: 0xe8f6ff, alpha: 0.95 * life });
+    }
+    this.pinkSplats = this.pinkSplats.filter((s) => nowMs < s.until);
+    for (const pop of sim.swordWavePops) {
+      const left = pop.untilMs - nowMs;
+      if (left <= 0) continue;
+      const lifeMs = 280;
+      const t = 1 - left / lifeMs;
+      const fade = 1 - t;
+      g.circle(pop.x, pop.y, 0.35 + t * 0.85);
+      g.stroke({ width: 0.12, color: 0x7ec8ff, alpha: 0.55 * fade });
+      g.circle(pop.x, pop.y, 0.2 + t * 0.45);
+      g.fill({ color: 0xb8e8ff, alpha: 0.4 * fade });
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + t * 0.8;
+        const len = 0.35 + t * 0.7;
+        g.moveTo(pop.x, pop.y);
+        g.lineTo(pop.x + Math.cos(a) * len, pop.y + Math.sin(a) * len * 0.7);
+        g.stroke({ width: 0.06, color: 0xe8f6ff, alpha: 0.65 * fade, cap: "round" });
+      }
+      g.circle(pop.x, pop.y, 0.1);
+      g.fill({ color: 0xffffff, alpha: 0.85 * fade });
+    }
     for (const puff of this.puffs) {
       const t = 1 - (puff.until - nowMs) / 280;
       g.ellipse(puff.x, puff.y - 0.35 - t * 0.45, 0.28 + t * 0.4, 0.18 + t * 0.22);
       g.fill({ color: 0xf0e6c8, alpha: 0.5 * (1 - t) });
     }
     const flash = sim.flash;
+    if (flash?.sparkle) {
+      const key = `${flash.startMs ?? 0}:${flash.untilMs}:${flash.x.toFixed(2)}`;
+      if (key !== this.lastSparkleFlashKey) {
+        this.lastSparkleFlashKey = key;
+        const origin = flashTravelPoint(sim, flash, 0.35);
+        const base = Math.atan2(flash.facingY, flash.facingX);
+        for (let i = 0; i < 14; i++) {
+          const a = base + (i / 14) * Math.PI * 2 + (i % 3) * 0.2;
+          const speed = 2.2 + (i % 5) * 0.55;
+          this.starBits.push({
+            x: origin.x + Math.cos(a) * flash.radius * 0.25,
+            y: origin.y + Math.sin(a) * flash.radius * 0.25,
+            vx: Math.cos(a) * speed,
+            vy: Math.sin(a) * speed,
+            until: nowMs + 420 + (i % 4) * 40,
+            born: nowMs,
+          });
+        }
+      }
+    } else if (!flash) {
+      this.lastSparkleFlashKey = "";
+    }
+    for (const star of this.starBits) {
+      const life = Math.max(0, Math.min(1, (star.until - nowMs) / Math.max(1, star.until - star.born)));
+      const age = (nowMs - star.born) / 1000;
+      const x = star.x + star.vx * age;
+      const y = star.y + star.vy * age;
+      const s = 0.08 + (1 - life) * 0.12;
+      g.moveTo(x, y - s);
+      g.lineTo(x + s * 0.28, y - s * 0.28);
+      g.lineTo(x + s, y);
+      g.lineTo(x + s * 0.28, y + s * 0.28);
+      g.lineTo(x, y + s);
+      g.lineTo(x - s * 0.28, y + s * 0.28);
+      g.lineTo(x - s, y);
+      g.lineTo(x - s * 0.28, y - s * 0.28);
+      g.closePath();
+      g.fill({ color: 0xfff6c8, alpha: 0.85 * life });
+      g.circle(x, y, s * 0.28);
+      g.fill({ color: 0xffffff, alpha: 0.95 * life });
+    }
+    this.starBits = this.starBits.filter((s) => nowMs < s.until);
     if (flash && flash.onBeat && sim.weaponId !== 3) {
       const facing = Math.atan2(flash.facingY, flash.facingX);
       const t = flashProgress(flash, sim.nowMs);
+      const origin = flashTravelPoint(sim, flash, t);
       const ang =
         flash.kind === "line"
           ? Math.atan2(flash.facingY, flash.facingX)
@@ -812,8 +1140,27 @@ export class WorldRenderer {
                 180
             : facing + t * Math.PI * 2;
       const r = flash.radius * 0.92;
-      g.ellipse(flash.x + Math.cos(ang) * r, flash.y + Math.sin(ang) * r, 0.16, 0.1);
-      g.fill({ color: 0xfff2a8, alpha: 0.75 });
+      const tipX = origin.x + Math.cos(ang) * r;
+      const tipY = origin.y + Math.sin(ang) * r;
+      const tipWarm = sim.weaponId === 1;
+      g.ellipse(tipX, tipY, 0.28, 0.18);
+      g.fill({ color: tipWarm ? 0x5aa8ff : 0xffb14a, alpha: 0.35 });
+      g.ellipse(tipX, tipY, 0.2, 0.13);
+      g.fill({ color: tipWarm ? 0xd8f0ff : 0xfff2a8, alpha: 0.85 });
+      g.circle(tipX, tipY, 0.09);
+      g.fill({ color: 0xffffff, alpha: 0.9 });
+      for (let i = 0; i < 5; i++) {
+        const a = ang + (i - 2) * 0.35;
+        const len = 0.35 + (1 - t) * 0.25;
+        g.moveTo(tipX, tipY);
+        g.lineTo(tipX + Math.cos(a) * len, tipY + Math.sin(a) * len);
+        g.stroke({
+          width: 0.05,
+          color: tipWarm ? 0x9ad4ff : 0xffe08a,
+          alpha: 0.45 * (1 - t * 0.4),
+          cap: "round",
+        });
+      }
     }
   }
 

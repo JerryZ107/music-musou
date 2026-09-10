@@ -17,10 +17,10 @@ export const HERO_ULT_DURATION_MS = 12_000;
 export const SAMURAI_ULT_ONBEAT_DAMAGE_BONUS = 2;
 export const SAMURAI_ULT_DASH_BONUS = 5;
 
-/** 枪客大招：突刺 +1 伤、攻速 +2 点；共 7 次强化攻击。 */
+/** 枪客大招：突刺 +1 伤、攻速 +1 点；共 7 次强化攻击。 */
 export const SPEAR_ULT_ATTACK_CHARGES = 7;
 export const SPEAR_ULT_DAMAGE_BONUS = 1;
-export const SPEAR_ULT_ATTACK_SPEED_BONUS = 2;
+export const SPEAR_ULT_ATTACK_SPEED_BONUS = 1;
 
 /** 枪客 15 点攻击范围标定（与旧版 TEMPLATE2 × 倍率一致）。 */
 const SPEAR_RANGE_AT_15 = TEMPLATE2_ATTACK_RANGE * SPEAR_ATTACK_RANGE_MULT;
@@ -45,7 +45,7 @@ export function consumeSpearUltAttack(sim: { weaponId: WeaponId; spearUltAttacks
   if (sim.weaponId === 2 && sim.spearUltAttacksLeft > 0) sim.spearUltAttacksLeft -= 1;
 }
 
-/** 攻速点 → 动作冷却（14 点 = 模板 130ms；每 1 点攻速相对旧 10 点制为 5/7 效果）。 */
+/** 攻速点 → 动作冷却（10 点 = 模板 ACTION_COOLDOWN_MS，约为旧基准攻速的 2/3）。 */
 export function cooldownMsFor(sim: {
   weaponId: WeaponId;
   spearUltAttacksLeft: number;
@@ -59,18 +59,14 @@ export function cooldownMsFor(sim: {
 /** 冲刺距离点 → 世界格（10 点 = SLIDE_DISTANCE）。 */
 export function slideDistanceFor(sim: { weaponId: WeaponId; ultBuffUntilMs: number; nowMs: number }): number {
   const stats = heroStatPoints(sim.weaponId);
-  let dash = stats.dashRange;
-  if (samuraiUltActive(sim)) dash += SAMURAI_ULT_DASH_BONUS;
+  const dash = stats.dashRange;
   return SLIDE_DISTANCE * (dash / STAT_TEMPLATE.dashRange);
 }
 
-/** 近战攻击半径：武士 10 点 = ATTACK_RANGE；枪客 15 点 = 旧版枪程。 */
+/** 近战攻击半径：武士 / 枪客 15 点共用枪程标定。 */
 export function attackRadiusFor(weaponId: WeaponId): number {
   const stats = heroStatPoints(weaponId);
-  if (weaponId === 1) {
-    return ATTACK_RANGE * (stats.attackRange / STAT_TEMPLATE.attackRange);
-  }
-  if (weaponId === 2) {
+  if (weaponId === 1 || weaponId === 2) {
     return SPEAR_RANGE_AT_15 * (stats.attackRange / 15);
   }
   return ATTACK_RANGE;

@@ -14,24 +14,49 @@ export const VIEW_W_TOUCH = 32;
 export const VIEW_H_TOUCH = 16;
 
 export const BEAT_WINDOW_MS = 300;
-/** 金环亮起前银环预警时长（此期间起至金环结束均可判强普）。 */
-export const BEAT_SILVER_PRE_MS = 300;
+/** 金环亮起前银环预警时长（仅预警，不参与强普判定）。 */
+export const BEAT_SILVER_PRE_MS = 120;
 export const HUD_GRACE_MS = 0;
+/**
+ * 额外规律脉冲：在原拍点之外，按 0.67s～1s/拍 补点（附近已有原拍则不重设）。
+ * 原分析拍点全部保留、照常可判强普。
+ */
+export const PULSE_PERIOD_MIN_MS = 670;
+export const PULSE_PERIOD_MAX_MS = 1000;
+/** 与已有拍点距离 ≤ 此值则视为「已有」，不重复补点。 */
+export const PULSE_DEDUP_MS = 120;
+/** 战斗顶端节拍进度条可视窗口（到达中点后时间轴滚动）。 */
+export const BEAT_TIMELINE_WINDOW_MS = 8000;
+/** 角色圆环进度：更短窗口 → 同屏时机更少；判定块视觉弧长仍按 8s 条换算，保持可辨。 */
+export const BEAT_RING_WINDOW_MS = 4000;
+/** 圆环半径占短边视野比例（小于旧 0.36）。 */
+export const BEAT_RING_RADIUS_FRAC = 0.17;
+/** 圆环线宽占短边比例（判定块厚度，保持可读）。 */
+export const BEAT_RING_THICK_FRAC = 0.034;
+/**
+ * 圆环游标锁定相位：正右为 0、顺时针；0.75 = 最上。
+ * （刷新点在正右，进度针钉在最上。）
+ */
+export const BEAT_RING_PLAYHEAD_FRAC = 0.75;
 /** Web Audio currentTime 接近扬声器，默认比 pygame 130ms 更短。 */
 export const DEFAULT_AUDIO_LATENCY_MS = 60;
 
 export const MINION_COUNT = 48 * 3;
 export const BOSS_COUNT = 4;
 export const MEGABOSS_COUNT = 1;
-export const MINION_HP = 2;
-export const BOSS_HP = 12 * 2;
-export const MEGABOSS_HP = BOSS_HP * 2;
+export const MINION_HP = 3;
+export const BOSS_HP = 72;
+export const MEGABOSS_HP = 144;
 export const SPAWN_CLEAR_RADIUS = 7;
 export const MIN_ENEMY_SPAWN_DIST = 10;
 
 export const PLAYER_HP = 5;
 /** 看广告复活恢复血量。 */
 export const REVIVE_HP = 3;
+/** 复活后世界冻结倒计时，再到继续。 */
+export const REVIVE_HOLD_MS = 3000;
+/** 倒计时结束后的无敌时间。 */
+export const REVIVE_IFRAME_MS = 1000;
 export const PLAYER_SPEED = 5.5;
 export const MINION_SPEED = 1.8;
 /** 尸王 / 王中王与小怪同速。 */
@@ -86,11 +111,16 @@ export const BULLET_RADIUS = 0.22;
 export const ATTACK_RANGE = (4.0 / 3) * 1.3;
 /** 铁铠武士模型缩放。 */
 export const SAMURAI_MODEL_SCALE = 2.5 * 0.75;
-/** 普攻动作冷却（全角色）；与滑步冷却独立。 */
-export const ACTION_COOLDOWN_MS = 130;
+/** 普攻动作冷却（全角色）；与滑步冷却独立。10 点攻速基准 = 旧 14 点攻速的 2/3。 */
+export const ACTION_COOLDOWN_MS = 195;
 export const BASIC_ATTACK_DAMAGE = 1;
+/** 卡拍强化普攻伤害 */
+export const ONBEAT_ATTACK_DAMAGE = 3;
 export const CONTACT_DAMAGE = 1;
 export const CONTACT_IFRAME_MS = 500;
+/** 卡拍强普命中屏幕震动（约为旧值一半）。 */
+export const ONBEAT_SHAKE = 2;
+export const ONBEAT_SLIDE_SHAKE = 2.5;
 /** 受伤击退：瞬时位移 + 速度冲量（沿怪物反方向与攻击反方向合成）。 */
 export const PLAYER_KNOCKBACK_BUMP = 0.42;
 export const PLAYER_KNOCKBACK_IMPULSE = 3.8;
@@ -102,8 +132,8 @@ export const SLIDE_DURATION_MS = 110;
 export const SLIDE_COOLDOWN_MS = SLIDE_DURATION_MS;
 export const SLIDE_PATH_SAMPLE = 0.55;
 
-/** 全曲 BPM 略放慢（×0.92，约慢 8%）。 */
-export const TRACK_BPM_SCALE = 0.92;
+/** 曲速与拍点时间轴必须 1:1（同为录音文件时间）。禁止只改 timeline 或只改 playbackRate。 */
+export const TRACK_BPM_SCALE = 1;
 
 /** 青衫枪客：相对旧 r=6 缩至 3/5。 */
 export const TEMPLATE2_ATTACK_RANGE = 6.0 * (3 / 5);
@@ -130,6 +160,23 @@ export const TEMPLATE3_DAMAGE_FACTOR = 0.5;
 export const TEMPLATE3_EXPLOSION_RADIUS = 1.35;
 export const TEMPLATE3_EXPLOSION_DAMAGE = 2;
 
+/** 弓使爆裂/寒冰：体积×2，3 发散射。 */
+export const ARCHER_SPECIAL_ARROW_RADIUS = BULLET_RADIUS * 2;
+export const ARCHER_SPECIAL_ARROW_COUNT = 3;
+export const ARCHER_SPECIAL_ARROW_SPREAD_DEG = 28;
+
+/** 弓使黄节拍：寒冰箭（扩散同爆裂；命中减速至 30%）。 */
+export const ARCHER_ICE_SLOW_FACTOR = 0.3;
+export const ARCHER_ICE_SLOW_MS = 3000;
+/** 弓使大招：雷电箭（体积相对旧版 ×4）+ 命中后带电扩散波。 */
+export const ARCHER_LIGHTNING_DAMAGE = 5;
+export const ARCHER_LIGHTNING_STUN_MS = 1000;
+export const ARCHER_LIGHTNING_BOLT_RADIUS = BULLET_RADIUS * 1.35 * 4;
+export const ARCHER_LIGHTNING_SPEED = TEMPLATE3_BULLET_SPEED * 2.4;
+/** 带电波：射程与弓使弹程（40 点标定）一致，伤害 2。 */
+export const ARCHER_SHOCK_WAVE_DAMAGE = 2;
+export const ARCHER_SHOCK_WAVE_SPEED = TEMPLATE3_BULLET_SPEED * 0.55;
+
 export const ULTIMATE_BEAT_CHARGES = 10;
 export const ULT_FX_MS = 560;
 
@@ -155,6 +202,42 @@ export const SAMURAI_SHIELD_MAX = 1;
 export const SAMURAI_SWING_MS = 120;
 export const SAMURAI_SWING_STRIKE_T = 0.5;
 export const SAMURAI_SLIDE_SWING_MS = 160;
+
+/** 武士轻节拍技能：圆形近战范围倍率（相对枪程标定，已减半）。 */
+export const SAMURAI_SKILL_LIGHT_RANGE_MULT = 1.7 / 2;
+/** 武士中节拍：三段剑气。 */
+export const SAMURAI_SWORD_WAVE_COUNT = 3;
+export const SAMURAI_SWORD_WAVE_RANGE = 40;
+/** 剑气宽度（世界点）；碰撞半宽 = 此值 / 2。相对旧宽 5 缩小 1/3。 */
+export const SAMURAI_SWORD_WAVE_WIDTH = (5 * 2) / 3;
+export const SAMURAI_SWORD_WAVE_DAMAGE = 2;
+export const SAMURAI_SWORD_WAVE_SPEED = 36;
+/** 三段剑气从身上依次发出的间隔。 */
+export const SAMURAI_SWORD_WAVE_STAGGER_MS = 70;
+/** 武士大招：剑气矮龙卷（半径为剑气半宽的 2.5 倍）。 */
+export const SAMURAI_TORNADO_RADIUS = (SAMURAI_SWORD_WAVE_WIDTH / 2) * 2.5;
+export const SAMURAI_TORNADO_SPEED = SAMURAI_SWORD_WAVE_SPEED;
+/** 无距离上限；保留字段仅兼容实体结构。 */
+export const SAMURAI_TORNADO_RANGE = Number.POSITIVE_INFINITY;
+export const SAMURAI_TORNADO_DURATION_MS = 3000;
+export const SAMURAI_TORNADO_IMPACT_DAMAGE = 5;
+export const SAMURAI_TORNADO_TICK_DAMAGE = 3;
+/** 龙卷视觉自旋（rad/ms）；持续伤害每转满一圈结算一次。 */
+export const SAMURAI_TORNADO_SPIN_RAD_PER_MS = 0.018;
+export const SAMURAI_TORNADO_TICK_MS = (Math.PI * 2) / SAMURAI_TORNADO_SPIN_RAD_PER_MS;
+/** 剑气命中消散特效时长。 */
+export const SAMURAI_SWORD_WAVE_POP_MS = 280;
+/** 武士重节拍：环绕飞剑（纯护盾，1 剑挡 1 血）。 */
+export const SAMURAI_ORBIT_SWORD_RADIUS = 5;
+export const SAMURAI_ORBIT_SWORD_DURATION_MS = 8000;
+export const SAMURAI_ORBIT_SWORD_HIT_R = 0.9;
+export const SAMURAI_ORBIT_SWORD_DAMAGE = 2;
+/** 飞剑角速度（rad/s），约 1.4s 一圈。 */
+export const SAMURAI_ORBIT_SWORD_OMEGA = (Math.PI * 2) / 1.4;
+
+/** 武士普攻：小幅剑气（大剑气 1/3 宽，射程对齐枪兵 15 点）。 */
+export const SAMURAI_BASIC_WAVE_WIDTH = SAMURAI_SWORD_WAVE_WIDTH / 3;
+export const SAMURAI_BASIC_WAVE_DAMAGE = 2;
 
 export const SLOT_COUNT = 3;
 export const SAVE_KEY = "musicmusou.saves.v1";

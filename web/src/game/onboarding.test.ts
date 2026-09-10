@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { advanceFirstClearGuide, guideStepLabel } from "./onboarding";
+import { advanceFirstClearGuide, guideStepLabel, normalizeGuideStep } from "./onboarding";
 
 describe("first clear guide", () => {
-  it("购买弓使后依次引导弓使、第二曲、第二关", () => {
+  it("商店买弓使后结束引导，不再引导选曲选关", () => {
     expect(advanceFirstClearGuide("shop_buy")).toBe("shop_back");
-    expect(advanceFirstClearGuide("shop_back")).toBe("select_archer");
-    expect(advanceFirstClearGuide("select_archer")).toBe("select_track");
-    expect(advanceFirstClearGuide("select_track")).toBe("select_level2");
-    expect(advanceFirstClearGuide("select_level2")).toBe("done");
+    expect(advanceFirstClearGuide("shop_back")).toBe("done");
+    expect(advanceFirstClearGuide("select_track")).toBe("done");
+    expect(normalizeGuideStep("select_level2")).toBe("done");
+    expect(normalizeGuideStep("select_archer")).toBe("done");
   });
 
-  it("整备页引导文案", () => {
-    expect(guideStepLabel("select_archer")).toContain("弓使");
-    expect(guideStepLabel("select_track")).toContain("第二");
-    expect(guideStepLabel("select_level2")).toContain("第二关");
-    expect(guideStepLabel("shop_back")).toContain("返回装备");
+  it("商店引导文案", () => {
+    expect(guideStepLabel("select_shop")).toContain("商城");
+    expect(guideStepLabel("shop_buy")).toContain("弓使");
+    expect(guideStepLabel("shop_back")).toContain("返回");
+    expect(guideStepLabel("select_track")).toBe("");
   });
 });

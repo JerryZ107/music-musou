@@ -7,7 +7,7 @@ import {
   HERO_PRICES,
 } from "./meta";
 import type { FirstClearGuideStep } from "./onboarding";
-import { isShopGuideStep } from "./onboarding";
+import { isShopGuideStep, normalizeGuideStep } from "./onboarding";
 import type { RunResult, TrackId, LevelId, WeaponId, HeroId } from "./types";
 
 /** 单存档槽的进度（金币 / 解锁 / 引导）。空槽从默认进度开始。 */
@@ -160,8 +160,10 @@ function legacyAccountMeta(acc: AccountData): AccountMeta | null {
     shopUnlocked,
     shopPromptPending: acc.shopPromptPending ?? base.shopPromptPending,
     firstClearGuideStep:
-      acc.firstClearGuideStep ??
-      (level1Cleared ? (acc.shopPromptPending ? "select_shop" : "done") : null),
+      normalizeGuideStep(
+        acc.firstClearGuideStep ??
+          (level1Cleared ? (acc.shopPromptPending ? "select_shop" : "done") : null),
+      ),
   };
 }
 
@@ -189,7 +191,7 @@ function normalizeMeta(raw: Partial<AccountMeta> | null | undefined, fallback?: 
     shopPromptPending: raw?.shopPromptPending ?? base.shopPromptPending,
     firstClearGuideStep:
       raw?.firstClearGuideStep !== undefined
-        ? raw.firstClearGuideStep
+        ? normalizeGuideStep(raw.firstClearGuideStep)
         : base.firstClearGuideStep,
   };
 }
@@ -262,12 +264,12 @@ export function getSlotMeta(account: string, index: number): AccountMeta {
   if (!slot) return defaultMeta();
   const archerOwned = slot.unlockedHeroes.includes(3);
   let shopPromptPending = slot.shopPromptPending;
-  let firstClearGuideStep = slot.firstClearGuideStep;
+  let firstClearGuideStep = normalizeGuideStep(slot.firstClearGuideStep);
   // 已买弓使：商店弓使引导永久失效（兼容旧存档卡在 shop_* 的情况）
   if (archerOwned) {
     shopPromptPending = false;
     if (isShopGuideStep(firstClearGuideStep)) {
-      firstClearGuideStep = "select_archer";
+      firstClearGuideStep = "done";
     }
   }
   return {
@@ -376,6 +378,7 @@ export function recordRun(account: string, index: number, result: RunResult): vo
 export function applyRunRewards(account: string, index: number, result: RunResult): RunResult {
   if (result.outcome !== "win") return result;
   const meta = getSlotMeta(account, index);
+  const existing = readSlot(account, index) ?? newSlotDraft();
   const rewards = computeWinRewards(result.levelId, meta.level1Cleared, meta.level2Cleared);
   const nextLevels = [...meta.unlockedLevels];
   if (rewards.levelUnlocked && !nextLevels.includes(rewards.levelUnlocked)) {
@@ -396,7 +399,11 @@ export function applyRunRewards(account: string, index: number, result: RunResul
     : level2First
       ? false
       : meta.shopPromptPending;
-  writeSlotMeta(account, index, {
+  // 新解锁的关卡/曲子自动切上，不再逐步引导点选
+  const nextLevelId = rewards.levelUnlocked ?? existing.levelId;
+  const nextTrackId = rewards.trackUnlocked ?? existing.trackId;
+  writeSlot(account, index, {
+    ...existing,
     gold: meta.gold + rewards.goldEarned,
     unlockedLevels: nextLevels,
     unlockedTracks: nextTracks,
@@ -406,6 +413,8 @@ export function applyRunRewards(account: string, index: number, result: RunResul
     shopUnlocked: meta.shopUnlocked || rewards.shopUnlocked,
     shopPromptPending: nextShopPrompt,
     firstClearGuideStep: nextGuideStep,
+    levelId: nextLevelId,
+    trackId: nextTrackId,
   });
   return {
     ...result,
@@ -423,25 +432,16 @@ export function setFirstClearGuideStep(
   step: FirstClearGuideStep | null,
 ): void {
   const meta = getSlotMeta(account, index);
-  const shopGuideSteps: FirstClearGuideStep[] = [
-    "select_shop",
-    "shop_archer",
-    "shop_buy",
-    "shop_back",
-  ];
+  const normalized = normalizeGuideStep(step);
   writeSlotMeta(account, index, {
     ...meta,
-    firstClearGuideStep: step,
+    firstClearGuideStep: normalized,
     shopPromptPending:
-      step === "done"
+      normalized === "done" || normalized == null
         ? false
-        : shopGuideSteps.includes(step as FirstClearGuideStep)
+        : isShopGuideStep(normalized)
           ? true
-          : // 已离开商店引导段后永久关闭，不再被后续步骤重新打开
-            step != null &&
-              ["select_archer", "select_track", "select_level2"].includes(step)
-            ? false
-            : meta.shopPromptPending,
+          : meta.shopPromptPending,
   });
 }
 

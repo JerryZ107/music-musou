@@ -1,5 +1,6 @@
 import {
   BASIC_ATTACK_DAMAGE,
+  ONBEAT_ATTACK_DAMAGE,
   BOSS_ATTACK_CD_MS,
   BOSS_ATTACK_RADIUS,
   BOSS_DANMAKU_COUNT,
@@ -42,12 +43,36 @@ import {
   MINION_WINDUP_MS,
   PLAYER_HP,
   REVIVE_HP,
+  REVIVE_HOLD_MS,
+  REVIVE_IFRAME_MS,
+  ONBEAT_SHAKE,
+  ONBEAT_SLIDE_SHAKE,
   PLAYER_RADIUS,
   PLAYER_SPEED,
-  SAMURAI_SHIELD_MAX,
   SAMURAI_SWING_MS,
   SAMURAI_SWING_STRIKE_T,
-  SAMURAI_SLIDE_SWING_MS,
+  SAMURAI_SKILL_LIGHT_RANGE_MULT,
+  SAMURAI_SWORD_WAVE_COUNT,
+  SAMURAI_SWORD_WAVE_RANGE,
+  SAMURAI_SWORD_WAVE_WIDTH,
+  SAMURAI_SWORD_WAVE_DAMAGE,
+  SAMURAI_SWORD_WAVE_SPEED,
+  SAMURAI_SWORD_WAVE_STAGGER_MS,
+  SAMURAI_TORNADO_RADIUS,
+  SAMURAI_TORNADO_SPEED,
+  SAMURAI_TORNADO_RANGE,
+  SAMURAI_TORNADO_DURATION_MS,
+  SAMURAI_TORNADO_IMPACT_DAMAGE,
+  SAMURAI_TORNADO_TICK_DAMAGE,
+  SAMURAI_TORNADO_TICK_MS,
+  SAMURAI_SWORD_WAVE_POP_MS,
+  SAMURAI_ORBIT_SWORD_RADIUS,
+  SAMURAI_ORBIT_SWORD_DURATION_MS,
+  SAMURAI_ORBIT_SWORD_HIT_R,
+  SAMURAI_ORBIT_SWORD_DAMAGE,
+  SAMURAI_ORBIT_SWORD_OMEGA,
+  SAMURAI_BASIC_WAVE_WIDTH,
+  SAMURAI_BASIC_WAVE_DAMAGE,
   ARCHER_BODY_SCALE,
   SLIDE_COOLDOWN_MS,
   SLIDE_DURATION_MS,
@@ -60,6 +85,17 @@ import {
   TEMPLATE3_EXPLOSION_DAMAGE,
   TEMPLATE3_EXPLOSION_RADIUS,
   TEMPLATE3_LOCK_RANGE,
+  ARCHER_SPECIAL_ARROW_RADIUS,
+  ARCHER_SPECIAL_ARROW_COUNT,
+  ARCHER_SPECIAL_ARROW_SPREAD_DEG,
+  ARCHER_ICE_SLOW_FACTOR,
+  ARCHER_ICE_SLOW_MS,
+  ARCHER_LIGHTNING_DAMAGE,
+  ARCHER_LIGHTNING_STUN_MS,
+  ARCHER_LIGHTNING_BOLT_RADIUS,
+  ARCHER_LIGHTNING_SPEED,
+  ARCHER_SHOCK_WAVE_DAMAGE,
+  ARCHER_SHOCK_WAVE_SPEED,
   ULTIMATE_BEAT_CHARGES,
   ULT_FX_MS,
   WORLD_H,
@@ -69,20 +105,18 @@ import {
   attackRadiusFor,
   bulletRangeFor,
   cooldownMsFor,
-  HERO_ULT_DURATION_MS,
-  samuraiUltActive,
   slideDistanceFor,
   consumeSpearUltAttack,
   spearUltActive,
   SPEAR_ULT_ATTACK_CHARGES,
   SPEAR_ULT_DAMAGE_BONUS,
-  SAMURAI_ULT_ONBEAT_DAMAGE_BONUS,
 } from "./heroStats";
 import {
   attackArcHits,
   attackCircleHits,
   attackLineHits,
   bodiesOverlap,
+  circlesOverlap,
   normalize,
   projectileHits,
   pushOut,
@@ -92,7 +126,22 @@ import { createWavePlan } from "./spawn";
 import { wavePlanIncludesFinalBoss } from "./meta";
 import { createStageObstacles, liveObstacles } from "./stage";
 import { emptyRunStats } from "./runResult";
-import type { AttackFlash, Clone, Enemy, EnemyKind, LevelId, Obstacle, Player, Sim, TrackId, WeaponId } from "./types";
+import type { BeatSkillTier } from "./beatSkill";
+import type {
+  AttackFlash,
+  Clone,
+  Enemy,
+  EnemyKind,
+  LevelId,
+  Obstacle,
+  OrbitSword,
+  Player,
+  ShockWave,
+  Sim,
+  SwordTornado,
+  TrackId,
+  WeaponId,
+} from "./types";
 
 export function playerRadius(weapon: WeaponId): number {
   return weapon === 3 ? PLAYER_RADIUS * ARCHER_BODY_SCALE : PLAYER_RADIUS;
@@ -103,14 +152,13 @@ export function attackRadius(weapon: WeaponId, _ultBuff = false): number {
 }
 
 export function attackDamage(
-  sim: Sim,
+  _sim: Sim,
   weapon: WeaponId,
   onBeat: boolean,
   thrust = false,
 ): number {
-  let dmg = BASIC_ATTACK_DAMAGE * (onBeat ? 2 : 1);
+  let dmg = onBeat ? ONBEAT_ATTACK_DAMAGE : BASIC_ATTACK_DAMAGE;
   if (weapon === 2 && thrust) dmg += SPEAR_ULT_DAMAGE_BONUS;
-  if (weapon === 1 && onBeat && samuraiUltActive(sim)) dmg += SAMURAI_ULT_ONBEAT_DAMAGE_BONUS;
   return dmg;
 }
 
@@ -197,6 +245,10 @@ export function createSim(opts: {
     shieldHp: 0,
     explosions: [],
     flash: null,
+    orbitSwords: [],
+    tornados: [],
+    swordWavePops: [],
+    shockWaves: [],
     nextId: nextId.n,
     spawnX,
     spawnY,
@@ -204,15 +256,12 @@ export function createSim(opts: {
     stats: emptyRunStats(),
     damagePopups: [],
     reviveAvailable: true,
+    reviveHoldUntilMs: 0,
+    reviveGraceUntilMs: 0,
     knockVX: 0,
     knockVY: 0,
   };
   return sim;
-}
-
-function grantSamuraiShieldOnBeat(sim: Sim, onBeat: boolean, hitCount: number): void {
-  if (sim.weaponId !== 1 || !onBeat || hitCount <= 0) return;
-  sim.shieldHp = Math.min(SAMURAI_SHIELD_MAX, Math.max(sim.shieldHp, 1));
 }
 
 function meleeFlashTiming(sim: Sim, totalMs: number): { startMs: number; untilMs: number } {
@@ -229,16 +278,124 @@ function meleeFlashTiming(sim: Sim, totalMs: number): { startMs: number; untilMs
 
 function setMeleeFlash(sim: Sim, flash: Omit<AttackFlash, "startMs" | "untilMs"> & { totalMs: number }): void {
   const { totalMs, ...rest } = flash;
-  const timing = meleeFlashTiming(sim, totalMs);
+  // 冲刺刀光：从起点转到终点，按时长匀速推进，不套武士命中帧回拨
+  const travel = !!(rest.path && rest.path.length >= 2);
+  const timing = travel
+    ? { startMs: sim.nowMs, untilMs: sim.nowMs + totalMs }
+    : meleeFlashTiming(sim, totalMs);
   sim.flash = { ...rest, ...timing };
+}
+
+function spawnSamuraiSwordWaves(sim: Sim, x: number, y: number, fx: number, fy: number): void {
+  const aim = lockNearest(x, y, sim.enemies, fx, fy);
+  sim.player.facingX = aim.x;
+  sim.player.facingY = aim.y;
+  const halfW = SAMURAI_SWORD_WAVE_WIDTH / 2;
+  for (let i = 0; i < SAMURAI_SWORD_WAVE_COUNT; i++) {
+    sim.bullets.push({
+      id: allocId(sim),
+      team: "player",
+      x,
+      y,
+      r: halfW,
+      ox: x,
+      oy: y,
+      ux: aim.x,
+      uy: aim.y,
+      traveled: 0,
+      maxRange: SAMURAI_SWORD_WAVE_RANGE,
+      damage: SAMURAI_SWORD_WAVE_DAMAGE,
+      explosive: false,
+      enhanced: true,
+      fromClone: false,
+      hitIds: new Set(),
+      active: true,
+      pierce: false,
+      style: "swordWave",
+      wakeAtMs: sim.nowMs + i * SAMURAI_SWORD_WAVE_STAGGER_MS,
+    });
+  }
+}
+
+/** 武士普攻：发 1 道小幅剑气（宽为大剑气 1/3，射程对齐枪兵）。 */
+function spawnSamuraiBasicWave(
+  sim: Sim,
+  x: number,
+  y: number,
+  fx: number,
+  fy: number,
+  onBeat: boolean,
+): void {
+  const aim = lockNearest(x, y, sim.enemies, fx, fy);
+  if (x === sim.player.x && y === sim.player.y) {
+    sim.player.facingX = aim.x;
+    sim.player.facingY = aim.y;
+  }
+  const halfW = SAMURAI_BASIC_WAVE_WIDTH / 2;
+  sim.bullets.push({
+    id: allocId(sim),
+    team: "player",
+    x,
+    y,
+    r: halfW,
+    ox: x,
+    oy: y,
+    ux: aim.x,
+    uy: aim.y,
+    traveled: 0,
+    maxRange: attackRadiusFor(1),
+    damage: SAMURAI_BASIC_WAVE_DAMAGE,
+    explosive: false,
+    enhanced: onBeat,
+    fromClone: false,
+    hitIds: new Set(),
+    active: true,
+    pierce: false,
+    style: "swordWave",
+  });
+}
+
+function spawnSamuraiOrbitSword(sim: Sim): void {
+  const p = sim.player;
+  const n = sim.orbitSwords.length;
+  const angle = (n * (Math.PI * 2)) / Math.max(1, n + 1);
+  const sword: OrbitSword = {
+    id: allocId(sim),
+    x: p.x + Math.cos(angle) * SAMURAI_ORBIT_SWORD_RADIUS,
+    y: p.y + Math.sin(angle) * SAMURAI_ORBIT_SWORD_RADIUS,
+    r: SAMURAI_ORBIT_SWORD_HIT_R,
+    angle,
+    omega: SAMURAI_ORBIT_SWORD_OMEGA,
+    orbitR: SAMURAI_ORBIT_SWORD_RADIUS,
+    untilMs: sim.nowMs + SAMURAI_ORBIT_SWORD_DURATION_MS,
+    damage: SAMURAI_ORBIT_SWORD_DAMAGE,
+    lastHitMs: new Map(),
+  };
+  sim.orbitSwords.push(sword);
+}
+
+/** 卡拍释放武士节拍技能；返回轻节拍范围倍率与星屑标记。 */
+function applySamuraiBeatSkill(
+  sim: Sim,
+  skill: BeatSkillTier | null | undefined,
+  x: number,
+  y: number,
+  fx: number,
+  fy: number,
+): { radiusMult: number; sparkle: boolean } {
+  if (sim.weaponId !== 1 || !skill) return { radiusMult: 1, sparkle: false };
+  if (skill === "light") return { radiusMult: SAMURAI_SKILL_LIGHT_RANGE_MULT, sparkle: true };
+  if (skill === "mid") {
+    spawnSamuraiSwordWaves(sim, x, y, fx, fy);
+    return { radiusMult: 1, sparkle: false };
+  }
+  spawnSamuraiOrbitSword(sim);
+  addEnergy(sim, 1);
+  return { radiusMult: 1, sparkle: false };
 }
 
 function allocId(sim: Sim): number {
   return sim.nextId++;
-}
-
-export function samuraiShieldActive(sim: Sim): boolean {
-  return sim.weaponId === 1 && sim.shieldHp > 0;
 }
 
 export { ultBuffActive } from "./heroStats";
@@ -354,7 +511,6 @@ function applyHits(sim: Sim, hits: Enemy[], dmg: number, onBeat: boolean, fromCl
   }
   sim.enemies = sim.enemies.filter((e) => e.hp > 0);
   maybeWin(sim);
-  grantSamuraiShieldOnBeat(sim, onBeat, beatHits);
   return beatHits;
 }
 
@@ -425,8 +581,9 @@ function fireBossDanmaku(sim: Sim, e: Enemy, ringBurst: boolean): void {
   }
 }
 
-export function doAttack(sim: Sim, onBeat: boolean): boolean {
+export function doAttack(sim: Sim, onBeat: boolean, skill: BeatSkillTier | null = null): boolean {
   if (sim.run !== "playing" && sim.run !== "tutorial") return false;
+  if (isReviveHolding(sim)) return false;
   if (isSliding(sim)) return false;
   if (!canPerformAttack(sim, onBeat)) return false;
   sim.lastAttackMs = sim.nowMs;
@@ -435,23 +592,74 @@ export function doAttack(sim: Sim, onBeat: boolean): boolean {
   const p = sim.player;
 
   if (sim.weaponId === 3) {
-    spawnPlayerBullet(sim, p.x, p.y, onBeat, false);
+    if (onBeat && skill === "heavy") {
+      spawnArcherClone(sim);
+      addEnergy(sim, 1);
+      return true;
+    }
+    spawnPlayerBullet(sim, p.x, p.y, onBeat, false, skill);
     for (const c of sim.clones) {
-      if (c.hp > 0) spawnPlayerBullet(sim, c.x, c.y, onBeat, true);
+      if (c.hp > 0) spawnPlayerBullet(sim, c.x, c.y, onBeat, true, null);
     }
     return true;
   }
 
   let fx = p.facingX;
   let fy = p.facingY;
-  if (sim.weaponId === 2) {
+  if (sim.weaponId === 1 || sim.weaponId === 2) {
     const aim = lockNearest(p.x, p.y, sim.enemies, fx, fy);
     fx = aim.x;
     fy = aim.y;
     p.facingX = fx;
     p.facingY = fy;
   }
-  const radius = attackRadius(sim.weaponId);
+
+  if (sim.weaponId === 1) {
+    const skillFx = onBeat ? applySamuraiBeatSkill(sim, skill, p.x, p.y, fx, fy) : { radiusMult: 1, sparkle: false };
+    // 绿：圆形近战（范围×0.85）；黄：3 道大剑气；其余：1 道小剑气
+    if (skill === "light") {
+      const radius = attackRadius(sim.weaponId) * skillFx.radiusMult;
+      const dmg = attackDamage(sim, sim.weaponId, true, false);
+      const hits = enemiesHitByShape(sim, p.x, p.y, radius, fx, fy, true);
+      const beatHits = applyHits(sim, hits, dmg, true, false);
+      addEnergy(sim, beatHits);
+      damageObstaclesInCircle(sim, p.x, p.y, radius, 1);
+      setMeleeFlash(sim, {
+        totalMs: SAMURAI_SWING_MS + 90,
+        x: p.x,
+        y: p.y,
+        radius,
+        kind: "circle",
+        facingX: fx,
+        facingY: fy,
+        onBeat: true,
+        path: null,
+        sparkle: true,
+      });
+      if (hits.length) sim.shake = Math.max(sim.shake, ONBEAT_SHAKE);
+      return true;
+    }
+    if (skill !== "mid") {
+      spawnSamuraiBasicWave(sim, p.x, p.y, fx, fy, onBeat);
+    }
+    const radius = attackRadius(sim.weaponId);
+    setMeleeFlash(sim, {
+      totalMs: onBeat ? SAMURAI_SWING_MS + 90 : SAMURAI_SWING_MS,
+      x: p.x,
+      y: p.y,
+      radius,
+      kind: "circle",
+      facingX: fx,
+      facingY: fy,
+      onBeat,
+      path: null,
+      sparkle: false,
+    });
+    return true;
+  }
+
+  const skillFx = { radiusMult: 1, sparkle: false };
+  const radius = attackRadius(sim.weaponId) * skillFx.radiusMult;
   const dmg = attackDamage(sim, sim.weaponId, onBeat, thrust);
   const hits = enemiesHitByShape(sim, p.x, p.y, radius, fx, fy, onBeat);
   const beatHits = applyHits(sim, hits, dmg, onBeat, false);
@@ -459,7 +667,7 @@ export function doAttack(sim: Sim, onBeat: boolean): boolean {
   damageObstaclesInCircle(sim, p.x, p.y, radius, 1);
   const kind = meleeFlashKind(sim, onBeat);
   setMeleeFlash(sim, {
-    totalMs: thrust ? 150 : SAMURAI_SWING_MS,
+    totalMs: thrust ? 150 : onBeat ? SAMURAI_SWING_MS + 90 : SAMURAI_SWING_MS,
     x: p.x,
     y: p.y,
     radius,
@@ -469,47 +677,185 @@ export function doAttack(sim: Sim, onBeat: boolean): boolean {
     onBeat: onBeat || thrust,
     path: null,
     arcDeg: kind === "arc" ? spearArcDeg(onBeat) : undefined,
+    sparkle: skillFx.sparkle,
   });
   if (spearUltEnhance) consumeSpearUltAttack(sim);
-  if (onBeat && hits.length) sim.shake = Math.max(sim.shake, 4);
+  if (onBeat && hits.length) sim.shake = Math.max(sim.shake, ONBEAT_SHAKE);
   return true;
 }
 
 function t3BulletDamage(onBeat: boolean): number {
-  const full = BASIC_ATTACK_DAMAGE * (onBeat ? 2 : 1);
+  const full = onBeat ? ONBEAT_ATTACK_DAMAGE : BASIC_ATTACK_DAMAGE;
   return Math.max(1, Math.round(full * TEMPLATE3_DAMAGE_FACTOR));
 }
 
-function spawnPlayerBullet(sim: Sim, x: number, y: number, onBeat: boolean, fromClone: boolean): void {
+function spawnArcherClone(sim: Sim): void {
+  const p = sim.player;
+  const c: Clone = {
+    id: allocId(sim),
+    x: p.x + p.facingY * 0.6,
+    y: p.y - p.facingX * 0.6,
+    r: CLONE_RADIUS,
+    hp: TEMPLATE3_CLONE_HP,
+    maxHp: TEMPLATE3_CLONE_HP,
+    lastHurtMs: -9999,
+  };
+  sim.clones.push(c);
+  sim.flash = {
+    untilMs: sim.nowMs + 320,
+    x: p.x,
+    y: p.y,
+    radius: 2.4,
+    kind: "ult",
+    facingX: p.facingX,
+    facingY: p.facingY,
+    onBeat: true,
+    path: null,
+  };
+  sim.shake = Math.max(sim.shake, 4);
+}
+
+function applyEnemySlow(e: Enemy, nowMs: number): void {
+  e.slowUntilMs = Math.max(e.slowUntilMs ?? 0, nowMs + ARCHER_ICE_SLOW_MS);
+  e.slowFactor = ARCHER_ICE_SLOW_FACTOR;
+}
+
+function applyEnemyStun(e: Enemy, nowMs: number): void {
+  e.stunUntilMs = Math.max(e.stunUntilMs ?? 0, nowMs + ARCHER_LIGHTNING_STUN_MS);
+}
+
+function enemySpeedMult(e: Enemy, nowMs: number): number {
+  if ((e.stunUntilMs ?? 0) > nowMs) return 0;
+  if ((e.slowUntilMs ?? 0) > nowMs) return e.slowFactor ?? 1;
+  return 1;
+}
+
+function spawnPlayerBullet(
+  sim: Sim,
+  x: number,
+  y: number,
+  onBeat: boolean,
+  fromClone: boolean,
+  skill: BeatSkillTier | null = null,
+): void {
   const aim = lockNearest(x, y, sim.enemies, sim.player.facingX, sim.player.facingY);
   if (!fromClone) {
     sim.player.facingX = aim.x;
     sim.player.facingY = aim.y;
   }
-  const beatShot = onBeat && !fromClone;
+  const ice = !fromClone && onBeat && skill === "mid";
+  const beatShot = onBeat && !fromClone && !ice && (skill === "light" || skill === null);
+  const special = beatShot || ice;
+  const count = special ? ARCHER_SPECIAL_ARROW_COUNT : 1;
+  const radius = special ? ARCHER_SPECIAL_ARROW_RADIUS : BULLET_RADIUS;
+  const spread = (ARCHER_SPECIAL_ARROW_SPREAD_DEG * Math.PI) / 180;
+  const baseAng = Math.atan2(aim.y, aim.x);
+  for (let i = 0; i < count; i++) {
+    const t = count <= 1 ? 0 : i / (count - 1) - 0.5;
+    const ang = baseAng + t * spread;
+    sim.bullets.push({
+      id: allocId(sim),
+      team: "player",
+      x,
+      y,
+      r: radius,
+      ox: x,
+      oy: y,
+      ux: Math.cos(ang),
+      uy: Math.sin(ang),
+      traveled: 0,
+      maxRange: bulletRangeFor(sim.weaponId),
+      damage: fromClone ? 1 : ice ? TEMPLATE3_EXPLOSION_DAMAGE : t3BulletDamage(onBeat),
+      explosive: beatShot || ice,
+      enhanced: beatShot || ice,
+      fromClone,
+      hitIds: new Set(),
+      active: true,
+      style: ice ? "iceArrow" : "normal",
+    });
+  }
+}
+
+function spawnArcherLightningBolt(sim: Sim): void {
+  const p = sim.player;
+  const aim = lockNearest(p.x, p.y, sim.enemies, p.facingX, p.facingY);
+  p.facingX = aim.x;
+  p.facingY = aim.y;
   sim.bullets.push({
     id: allocId(sim),
     team: "player",
-    x,
-    y,
-    r: BULLET_RADIUS,
-    ox: x,
-    oy: y,
+    x: p.x,
+    y: p.y,
+    r: ARCHER_LIGHTNING_BOLT_RADIUS,
+    ox: p.x,
+    oy: p.y,
     ux: aim.x,
     uy: aim.y,
     traveled: 0,
-    maxRange: bulletRangeFor(sim.weaponId),
-    damage: fromClone ? 1 : t3BulletDamage(onBeat),
-    explosive: beatShot,
-    enhanced: beatShot,
-    fromClone,
+    maxRange: bulletRangeFor(3),
+    damage: ARCHER_LIGHTNING_DAMAGE,
+    explosive: false,
+    enhanced: true,
+    fromClone: false,
     hitIds: new Set(),
     active: true,
+    style: "lightningBolt",
   });
 }
 
-export function doSlide(sim: Sim, onBeat: boolean, dirX: number, dirY: number): boolean {
+function spawnShockWave(sim: Sim, x: number, y: number, skipEnemyId?: number): void {
+  const hitIds = new Set<number>();
+  if (skipEnemyId !== undefined) hitIds.add(skipEnemyId);
+  const wave: ShockWave = {
+    id: allocId(sim),
+    x,
+    y,
+    radius: 0,
+    maxRadius: bulletRangeFor(3),
+    speed: ARCHER_SHOCK_WAVE_SPEED,
+    damage: ARCHER_SHOCK_WAVE_DAMAGE,
+    hitIds,
+    active: true,
+  };
+  sim.shockWaves.push(wave);
+}
+
+function stepShockWaves(sim: Sim, dtSec: number): void {
+  if (!sim.shockWaves.length) return;
+  let anyHit = false;
+  for (const w of sim.shockWaves) {
+    if (!w.active) continue;
+    const prev = w.radius;
+    w.radius = Math.min(w.maxRadius, w.radius + w.speed * dtSec);
+    for (const e of sim.enemies) {
+      if (w.hitIds.has(e.id)) continue;
+      const d = Math.hypot(e.x - w.x, e.y - w.y);
+      // 波前扫过：进入当前半径且越过上一帧半径（含体表）
+      if (d > w.radius + e.r) continue;
+      if (d + e.r < prev) continue;
+      w.hitIds.add(e.id);
+      e.hp -= w.damage;
+      registerHit(sim, e.x, e.y, w.damage, true, false);
+      anyHit = true;
+    }
+    if (w.radius >= w.maxRadius - 1e-6) w.active = false;
+  }
+  sim.shockWaves = sim.shockWaves.filter((w) => w.active);
+  if (anyHit) {
+    sim.enemies = sim.enemies.filter((e) => e.hp > 0);
+    maybeWin(sim);
+  }
+}
+
+export function doSlide(
+  sim: Sim,
+  onBeat: boolean,
+  dirX: number,
+  dirY: number,
+  skill: BeatSkillTier | null = null,
+): boolean {
   if (sim.run !== "playing" && sim.run !== "tutorial") return false;
+  if (isReviveHolding(sim)) return false;
   if (isSliding(sim)) return false;
   if (!canPerformSlide(sim, onBeat)) return false;
   const aim = normalize(dirX, dirY, { x: sim.player.facingX, y: sim.player.facingY });
@@ -528,23 +874,96 @@ export function doSlide(sim: Sim, onBeat: boolean, dirX: number, dirY: number): 
   sim.slideToX = dest.x;
   sim.slideToY = dest.y;
   sim.slideUntil = sim.nowMs + SLIDE_DURATION_MS;
-  if (!onBeat) return true;
 
   if (sim.weaponId === 3) {
-    spawnPlayerBullet(sim, sim.slideFromX, sim.slideFromY, true, false);
+    if (onBeat && skill === "heavy") {
+      spawnArcherClone(sim);
+      addEnergy(sim, 1);
+      return true;
+    }
+    spawnPlayerBullet(sim, sim.slideFromX, sim.slideFromY, onBeat, false, skill);
     return true;
   }
 
   let fx = aim.x;
   let fy = aim.y;
-  if (sim.weaponId === 2) {
+  if (sim.weaponId === 1 || sim.weaponId === 2) {
     const locked = lockNearest(sim.slideFromX, sim.slideFromY, sim.enemies, fx, fy);
     fx = locked.x;
     fy = locked.y;
   }
-  const radius = attackRadius(sim.weaponId);
+
+  if (sim.weaponId === 1) {
+    const skillFx = onBeat
+      ? applySamuraiBeatSkill(sim, skill, sim.slideFromX, sim.slideFromY, fx, fy)
+      : { radiusMult: 1, sparkle: false };
+    if (skill === "light") {
+      const radius = attackRadius(sim.weaponId) * skillFx.radiusMult;
+      const dmg = attackDamage(sim, sim.weaponId, true, false);
+      const path = samplePath(
+        sim.slideFromX,
+        sim.slideFromY,
+        sim.slideToX,
+        sim.slideToY,
+        SLIDE_PATH_SAMPLE,
+      );
+      const hitIds = new Set<number>();
+      const hits: Enemy[] = [];
+      for (const pt of path) {
+        for (const e of enemiesHitByShape(sim, pt.x, pt.y, radius, fx, fy, true)) {
+          if (hitIds.has(e.id)) continue;
+          hitIds.add(e.id);
+          hits.push(e);
+        }
+      }
+      const beatHits = applyHits(sim, hits, dmg, true, false);
+      addEnergy(sim, beatHits);
+      for (const pt of path) damageObstaclesInCircle(sim, pt.x, pt.y, radius, 1);
+      setMeleeFlash(sim, {
+        totalMs: SLIDE_DURATION_MS,
+        x: sim.slideFromX,
+        y: sim.slideFromY,
+        radius,
+        kind: "circle",
+        facingX: fx,
+        facingY: fy,
+        onBeat: true,
+        path: [
+          { x: sim.slideFromX, y: sim.slideFromY, r: radius },
+          { x: sim.slideToX, y: sim.slideToY, r: radius },
+        ],
+        sparkle: true,
+      });
+      if (hits.length) sim.shake = Math.max(sim.shake, ONBEAT_SLIDE_SHAKE);
+      return true;
+    }
+    if (skill !== "mid") {
+      spawnSamuraiBasicWave(sim, sim.slideFromX, sim.slideFromY, fx, fy, onBeat);
+    }
+    const radius = attackRadius(sim.weaponId);
+    setMeleeFlash(sim, {
+      totalMs: SLIDE_DURATION_MS,
+      x: sim.slideFromX,
+      y: sim.slideFromY,
+      radius,
+      kind: "circle",
+      facingX: fx,
+      facingY: fy,
+      onBeat,
+      path: [
+        { x: sim.slideFromX, y: sim.slideFromY, r: radius },
+        { x: sim.slideToX, y: sim.slideToY, r: radius },
+      ],
+      sparkle: false,
+    });
+    return true;
+  }
+
+  const skillFx = { radiusMult: 1, sparkle: false };
+  const radius = attackRadius(sim.weaponId) * skillFx.radiusMult;
   const spearUltEnhance = spearUltActive(sim);
-  const dmg = attackDamage(sim, sim.weaponId, true, spearUltEnhance);
+  const thrust = spearUltEnhance && !onBeat;
+  const dmg = attackDamage(sim, sim.weaponId, onBeat, thrust);
   const path = samplePath(
     sim.slideFromX,
     sim.slideFromY,
@@ -555,61 +974,102 @@ export function doSlide(sim: Sim, onBeat: boolean, dirX: number, dirY: number): 
   const hitIds = new Set<number>();
   const hits: Enemy[] = [];
   for (const pt of path) {
-    for (const e of enemiesHitByShape(sim, pt.x, pt.y, radius, fx, fy, true)) {
+    for (const e of enemiesHitByShape(sim, pt.x, pt.y, radius, fx, fy, onBeat)) {
       if (hitIds.has(e.id)) continue;
       hitIds.add(e.id);
       hits.push(e);
     }
   }
-  const beatHits = applyHits(sim, hits, dmg, true, false);
-  if (!spearUltEnhance) addEnergy(sim, beatHits);
+  const beatHits = applyHits(sim, hits, dmg, onBeat, false);
+  if (onBeat && !spearUltEnhance) addEnergy(sim, beatHits);
   for (const pt of path) damageObstaclesInCircle(sim, pt.x, pt.y, radius, 1);
-  const kind = meleeFlashKind(sim, true);
+  const kind = meleeFlashKind(sim, onBeat);
+  // 伤害沿路径采样；画面单道刀光随角色从起点转到终点
   setMeleeFlash(sim, {
-    totalMs: SAMURAI_SLIDE_SWING_MS,
+    totalMs: SLIDE_DURATION_MS,
     x: sim.slideFromX,
     y: sim.slideFromY,
     radius,
     kind,
     facingX: fx,
     facingY: fy,
-    onBeat: true,
-    path: path.map((p) => ({ x: p.x, y: p.y, r: radius })),
-    arcDeg: kind === "arc" ? spearArcDeg(true) : undefined,
+    onBeat: onBeat || thrust,
+    path: [
+      { x: sim.slideFromX, y: sim.slideFromY, r: radius },
+      { x: sim.slideToX, y: sim.slideToY, r: radius },
+    ],
+    arcDeg: kind === "arc" ? spearArcDeg(onBeat) : undefined,
+    sparkle: skillFx.sparkle,
   });
   if (spearUltEnhance) consumeSpearUltAttack(sim);
-  if (hits.length) sim.shake = Math.max(sim.shake, 5);
+  if (hits.length) sim.shake = Math.max(sim.shake, onBeat ? ONBEAT_SLIDE_SHAKE : 3);
   return true;
+}
+
+function spawnSamuraiTornado(sim: Sim): void {
+  const p = sim.player;
+  const aim = lockNearest(p.x, p.y, sim.enemies, p.facingX, p.facingY);
+  p.facingX = aim.x;
+  p.facingY = aim.y;
+  const t: SwordTornado = {
+    id: allocId(sim),
+    x: p.x,
+    y: p.y,
+    r: SAMURAI_TORNADO_RADIUS,
+    ux: aim.x,
+    uy: aim.y,
+    traveled: 0,
+    maxRange: SAMURAI_TORNADO_RANGE,
+    seeking: true,
+    untilMs: 0,
+    lastTickMs: sim.nowMs,
+    impactDone: false,
+    active: true,
+  };
+  sim.tornados.push(t);
+}
+
+function pushSwordWavePop(sim: Sim, x: number, y: number): void {
+  sim.swordWavePops.push({ x, y, untilMs: sim.nowMs + SAMURAI_SWORD_WAVE_POP_MS });
 }
 
 export function doUltimate(sim: Sim): boolean {
   if (sim.run !== "playing" && sim.run !== "tutorial") return false;
+  if (isReviveHolding(sim)) return false;
   if (sim.energy < ULTIMATE_BEAT_CHARGES) return false;
   sim.energy = 0;
   sim.ultFxUntilMs = sim.nowMs + ULT_FX_MS;
   sim.shake = Math.max(sim.shake, 9);
   const p = sim.player;
-  if (sim.weaponId === 3) {
-    const c: Clone = {
-      id: allocId(sim),
-      x: p.x + p.facingY * 0.6,
-      y: p.y - p.facingX * 0.6,
-      r: CLONE_RADIUS,
-      hp: TEMPLATE3_CLONE_HP,
-      maxHp: TEMPLATE3_CLONE_HP,
-      lastHurtMs: -9999,
-    };
-    sim.clones.push(c);
+  if (sim.weaponId === 1) {
+    spawnSamuraiTornado(sim);
     sim.flash = {
-      untilMs: sim.nowMs + 320,
+      untilMs: sim.nowMs + 300,
       x: p.x,
       y: p.y,
-      radius: 2.4,
+      radius: SAMURAI_TORNADO_RADIUS * 2.2,
       kind: "ult",
       facingX: p.facingX,
       facingY: p.facingY,
       onBeat: true,
       path: null,
+      sparkle: true,
+    };
+    return true;
+  }
+  if (sim.weaponId === 3) {
+    spawnArcherLightningBolt(sim);
+    sim.flash = {
+      untilMs: sim.nowMs + 320,
+      x: p.x,
+      y: p.y,
+      radius: 2.8,
+      kind: "ult",
+      facingX: p.facingX,
+      facingY: p.facingY,
+      onBeat: true,
+      path: null,
+      sparkle: true,
     };
     return true;
   }
@@ -620,21 +1080,6 @@ export function doUltimate(sim: Sim): boolean {
       x: p.x,
       y: p.y,
       radius: attackRadius(2),
-      kind: "ult",
-      facingX: p.facingX,
-      facingY: p.facingY,
-      onBeat: true,
-      path: null,
-    };
-    return true;
-  }
-  if (sim.weaponId === 1) {
-    sim.ultBuffUntilMs = sim.nowMs + HERO_ULT_DURATION_MS;
-    sim.flash = {
-      untilMs: sim.nowMs + 300,
-      x: p.x,
-      y: p.y,
-      radius: attackRadius(1) * 1.15,
       kind: "ult",
       facingX: p.facingX,
       facingY: p.facingY,
@@ -672,8 +1117,14 @@ export function beginCombat(sim: Sim): void {
   sim.spearUltAttacksLeft = 0;
   sim.shieldHp = 0;
   sim.reviveAvailable = true;
+  sim.reviveHoldUntilMs = 0;
+  sim.reviveGraceUntilMs = 0;
   sim.explosions = [];
   sim.bullets = [];
+  sim.orbitSwords = [];
+  sim.tornados = [];
+  sim.swordWavePops = [];
+  sim.shockWaves = [];
   sim.clones = [];
   sim.obstacles = createStageObstacles({ n: sim.nextId });
   sim.propBreaks = [];
@@ -700,8 +1151,14 @@ export function restartRun(sim: Sim, tutorial: boolean): void {
   sim.spearAtkSpeedStacks = 0;
   sim.shieldHp = 0;
   sim.reviveAvailable = true;
+  sim.reviveHoldUntilMs = 0;
+  sim.reviveGraceUntilMs = 0;
   sim.explosions = [];
   sim.bullets = [];
+  sim.orbitSwords = [];
+  sim.tornados = [];
+  sim.swordWavePops = [];
+  sim.shockWaves = [];
   sim.clones = [];
   sim.obstacles = createStageObstacles({ n: sim.nextId });
   sim.propBreaks = [];
@@ -730,15 +1187,23 @@ export function restartRun(sim: Sim, tutorial: boolean): void {
 
 function triggerExplosion(sim: Sim, x: number, y: number, fromClone: boolean): number {
   sim.explosions.push({
-    untilMs: sim.nowMs + 240,
+    untilMs: sim.nowMs + 280,
     x,
     y,
     radius: TEMPLATE3_EXPLOSION_RADIUS,
+    enhanced: !fromClone,
   });
   const origin = { x, y, r: 0 };
   const hits = sim.enemies.filter((e) => attackCircleHits(origin, TEMPLATE3_EXPLOSION_RADIUS, e));
   damageObstaclesInCircle(sim, x, y, TEMPLATE3_EXPLOSION_RADIUS, 2);
   return applyHits(sim, hits, TEMPLATE3_EXPLOSION_DAMAGE, true, fromClone);
+}
+
+function triggerIceExplosion(sim: Sim, x: number, y: number, fromClone: boolean): number {
+  const origin = { x, y, r: 0 };
+  const inBlast = sim.enemies.filter((e) => attackCircleHits(origin, TEMPLATE3_EXPLOSION_RADIUS, e));
+  for (const e of inBlast) applyEnemySlow(e, sim.nowMs);
+  return triggerExplosion(sim, x, y, fromClone);
 }
 
 function bulletHitsObstacle(sim: Sim, b: { x: number; y: number; r: number; damage: number }): boolean {
@@ -758,7 +1223,15 @@ function stepBullets(sim: Sim, dtSec: number): void {
   let beatHits = 0;
   for (const b of sim.bullets) {
     if (!b.active) continue;
-    const speed = b.team === "enemy" ? ENEMY_BULLET_SPEED : TEMPLATE3_BULLET_SPEED;
+    if (b.wakeAtMs !== undefined && sim.nowMs < b.wakeAtMs) continue;
+    const speed =
+      b.team === "enemy"
+        ? ENEMY_BULLET_SPEED
+        : b.style === "swordWave"
+          ? SAMURAI_SWORD_WAVE_SPEED
+          : b.style === "lightningBolt"
+            ? ARCHER_LIGHTNING_SPEED
+            : TEMPLATE3_BULLET_SPEED;
     const stepCap = speed * dtSec;
     const remain = b.maxRange - b.traveled;
     const step = Math.min(stepCap, remain);
@@ -766,11 +1239,20 @@ function stepBullets(sim: Sim, dtSec: number): void {
       b.active = false;
       continue;
     }
+    // 分段大剑气醒来时贴在角色当前位置发出；普攻小剑气保持生成点
+    if (b.style === "swordWave" && b.wakeAtMs !== undefined && b.traveled <= 1e-6) {
+      b.x = sim.player.x;
+      b.y = sim.player.y;
+      b.ox = b.x;
+      b.oy = b.y;
+    }
     b.x += b.ux * step;
     b.y += b.uy * step;
     b.traveled += step;
 
-    if (bulletHitsObstacle(sim, b)) {
+    // 剑气 / 雷电不撞障碍
+    const ignoreObstacles = b.style === "swordWave" || b.style === "lightningBolt";
+    if (!ignoreObstacles && bulletHitsObstacle(sim, b)) {
       b.active = false;
       continue;
     }
@@ -804,15 +1286,31 @@ function stepBullets(sim: Sim, dtSec: number): void {
       if (b.hitIds.has(e.id)) continue;
       if (!projectileHits(b, e)) continue;
       b.hitIds.add(e.id);
+      if (b.style === "lightningBolt") {
+        e.hp -= b.damage;
+        registerHit(sim, e.x, e.y, b.damage, true, false);
+        applyEnemyStun(e, sim.nowMs);
+        spawnShockWave(sim, e.x, e.y, e.id);
+        b.active = false;
+        break;
+      }
       if (b.explosive) {
-        beatHits += triggerExplosion(sim, e.x, e.y, b.fromClone);
+        beatHits +=
+          b.style === "iceArrow"
+            ? triggerIceExplosion(sim, e.x, e.y, b.fromClone)
+            : triggerExplosion(sim, e.x, e.y, b.fromClone);
         b.active = false;
         break;
       }
       e.hp -= b.damage;
+      registerHit(sim, e.x, e.y, b.damage, !!b.enhanced, b.fromClone);
+      // 卡拍非大招弹体命中充能（普攻剑气 / 黄剑气 / 寒冰等）；大招雷电不计
       if (b.enhanced && !b.fromClone) beatHits += 1;
-      b.active = false;
-      break;
+      if (!b.pierce) {
+        if (b.style === "swordWave") pushSwordWavePop(sim, e.x, e.y);
+        b.active = false;
+        break;
+      }
     }
     if (b.traveled >= b.maxRange - 1e-6) b.active = false;
   }
@@ -820,6 +1318,71 @@ function stepBullets(sim: Sim, dtSec: number): void {
   sim.bullets = sim.bullets.filter((b) => b.active);
   addEnergy(sim, beatHits);
   maybeWin(sim);
+}
+
+function stepTornados(sim: Sim, dtSec: number): void {
+  if (!sim.tornados.length) return;
+  let anyHit = false;
+  for (const t of sim.tornados) {
+    if (!t.active) continue;
+    if (t.seeking) {
+      const aim = lockNearest(t.x, t.y, sim.enemies, t.ux, t.uy);
+      t.ux = aim.x;
+      t.uy = aim.y;
+      const step = SAMURAI_TORNADO_SPEED * dtSec;
+      t.x += t.ux * step;
+      t.y += t.uy * step;
+      t.traveled += step;
+      // 仅圆心落入敌人 Hit Volume 才停下（无视障碍、无射程上限）
+      let hit: Enemy | null = null;
+      for (const e of sim.enemies) {
+        if (Math.hypot(t.x - e.x, t.y - e.y) <= e.r) {
+          hit = e;
+          break;
+        }
+      }
+      if (hit) {
+        hit.hp -= SAMURAI_TORNADO_IMPACT_DAMAGE;
+        registerHit(sim, hit.x, hit.y, SAMURAI_TORNADO_IMPACT_DAMAGE, true, false);
+        t.seeking = false;
+        t.impactDone = true;
+        t.untilMs = sim.nowMs + SAMURAI_TORNADO_DURATION_MS;
+        t.lastTickMs = sim.nowMs;
+        anyHit = true;
+        sim.shake = Math.max(sim.shake, 5);
+      }
+      continue;
+    }
+    if (sim.nowMs >= t.untilMs) {
+      t.active = false;
+      continue;
+    }
+    if (sim.nowMs - t.lastTickMs >= SAMURAI_TORNADO_TICK_MS) {
+      t.lastTickMs = sim.nowMs;
+      for (const e of sim.enemies) {
+        if (!circlesOverlap(t, e)) continue;
+        e.hp -= SAMURAI_TORNADO_TICK_DAMAGE;
+        registerHit(sim, e.x, e.y, SAMURAI_TORNADO_TICK_DAMAGE, true, false);
+        anyHit = true;
+      }
+    }
+  }
+  sim.tornados = sim.tornados.filter((t) => t.active);
+  if (anyHit) {
+    sim.enemies = sim.enemies.filter((e) => e.hp > 0);
+    maybeWin(sim);
+  }
+}
+
+function stepOrbitSwords(sim: Sim, dtSec: number): void {
+  if (!sim.orbitSwords.length) return;
+  const p = sim.player;
+  for (const s of sim.orbitSwords) {
+    s.angle += s.omega * dtSec;
+    s.x = p.x + Math.cos(s.angle) * s.orbitR;
+    s.y = p.y + Math.sin(s.angle) * s.orbitR;
+  }
+  sim.orbitSwords = sim.orbitSwords.filter((s) => s.untilMs > sim.nowMs);
 }
 
 function knockbackStrengthForEnemy(kind: EnemyKind): number {
@@ -887,6 +1450,7 @@ function damagePlayer(
   knock?: { fromX: number; fromY: number; attackX?: number; attackY?: number; strength?: number },
 ): void {
   if (sim.run !== "playing") return;
+  if (isReviveHolding(sim) || isReviveInvulnerable(sim)) return;
   if (sim.nowMs - sim.lastHurtMs < CONTACT_IFRAME_MS) return;
   sim.lastHurtMs = sim.nowMs;
   if (knock) {
@@ -899,17 +1463,21 @@ function damagePlayer(
       knock.attackY,
     );
   }
-  if (sim.shieldHp > 0 && sim.weaponId === 1) {
-    sim.shieldHp = Math.max(0, sim.shieldHp - amount);
+  let dmg = amount;
+  // 飞剑作护盾：1 剑挡 1 血，单次受击可按伤害量连扣多把
+  if (sim.weaponId === 1 && sim.orbitSwords.length > 0 && dmg > 0) {
+    const blocked = Math.min(dmg, sim.orbitSwords.length);
+    sim.orbitSwords.splice(sim.orbitSwords.length - blocked, blocked);
+    dmg -= blocked;
     sim.shake = Math.max(sim.shake, 4);
-  } else {
-    sim.stats.damageTaken += amount;
-    sim.player.hp -= amount;
-    sim.shake = Math.max(sim.shake, 6);
-    if (sim.player.hp <= 0) {
-      sim.player.hp = 0;
-      sim.run = "lose";
-    }
+  }
+  if (dmg <= 0) return;
+  sim.stats.damageTaken += dmg;
+  sim.player.hp -= dmg;
+  sim.shake = Math.max(sim.shake, 6);
+  if (sim.player.hp <= 0) {
+    sim.player.hp = 0;
+    sim.run = "lose";
   }
 }
 
@@ -1126,7 +1694,7 @@ function stepLungeMotion(sim: Sim, e: Enemy, dtSec: number): void {
   const tx = e.lungeToX ?? e.x;
   const ty = e.lungeToY ?? e.y;
   const remainDist = lungeRemaining(e);
-  const speed = e.lungeSpeed ?? MINION_LUNGE_SPEED;
+  const speed = (e.lungeSpeed ?? MINION_LUNGE_SPEED) * enemySpeedMult(e, sim.nowMs);
   const prevX = e.x;
   const prevY = e.y;
   const step = Math.min(speed * dtSec, remainDist);
@@ -1148,6 +1716,7 @@ function stepLungeMotion(sim: Sim, e: Enemy, dtSec: number): void {
 function stepEnemies(sim: Sim, dtSec: number): void {
   for (const e of sim.enemies) {
     const now = sim.nowMs;
+    if ((e.stunUntilMs ?? 0) > now) continue;
     const windup = e.windupUntil ?? 0;
     const strike = e.strikeUntil ?? 0;
     if (windup > 0 && now < windup) continue;
@@ -1216,7 +1785,7 @@ function stepEnemies(sim: Sim, dtSec: number): void {
     } else if (e.kind === "boss" || e.kind === "megaboss") {
       if (tryStartBossAttack(sim, e, tx, ty, engage, now)) continue;
     }
-    const step = MINION_SPEED * dtSec;
+    const step = MINION_SPEED * enemySpeedMult(e, now) * dtSec;
     e.x += dirX * step;
     e.y += dirY * step;
     const c = clampBody(sim, e.x, e.y, e.r);
@@ -1248,6 +1817,7 @@ function nearestChaseTarget(sim: Sim, from: { x: number; y: number }): { x: numb
 
 function stepContact(sim: Sim): void {
   if (sim.run !== "playing") return;
+  if (isReviveHolding(sim)) return;
   const sliding = isSliding(sim);
   for (const c of sim.clones) {
     if (c.hp <= 0) continue;
@@ -1286,7 +1856,10 @@ export function stepSim(sim: Sim, dtMs: number, moveX: number, moveY: number): v
   if (sim.flash && sim.nowMs >= sim.flash.untilMs) sim.flash = null;
   sim.explosions = sim.explosions.filter((e) => sim.nowMs < e.untilMs);
   sim.propBreaks = sim.propBreaks.filter((e) => sim.nowMs < e.untilMs);
+  sim.swordWavePops = sim.swordWavePops.filter((e) => sim.nowMs < e.untilMs);
   if (sim.run !== "playing" && sim.run !== "tutorial") return;
+  // 复活倒计时：只走时间，冻结移动与战斗
+  if (isReviveHolding(sim)) return;
 
   const dtSec = dt / 1000;
   if (sim.nowMs < sim.slideUntil) {
@@ -1308,6 +1881,9 @@ export function stepSim(sim: Sim, dtMs: number, moveX: number, moveY: number): v
   if (sim.run === "playing") {
     stepEnemies(sim, dtSec);
     if (sim.bullets.length) stepBullets(sim, dtSec);
+    if (sim.shockWaves.length) stepShockWaves(sim, dtSec);
+    if (sim.tornados.length) stepTornados(sim, dtSec);
+    if (sim.orbitSwords.length) stepOrbitSwords(sim, dtSec);
     stepContact(sim);
     stepWaveSpawning(sim);
   }
@@ -1334,12 +1910,14 @@ export function nearestBoss(sim: Sim): Enemy | null {
   return bosses.reduce((a, b) => (distTo(a, p) < distTo(b, p) ? a : b));
 }
 
-/** 看广告复活：回到 playing，REVIVE_HP，本局复活次数用尽。 */
+/** 看广告复活：回到 playing，REVIVE_HP，本局复活次数用尽；先 3s 倒计时再开打，并有 1s 无敌。 */
 export function reviveRun(sim: Sim): boolean {
   if (sim.run !== "lose" || !sim.reviveAvailable) return false;
   sim.run = "playing";
   sim.player.hp = REVIVE_HP;
   sim.reviveAvailable = false;
+  sim.reviveHoldUntilMs = sim.nowMs + REVIVE_HOLD_MS;
+  sim.reviveGraceUntilMs = sim.nowMs + REVIVE_HOLD_MS + REVIVE_IFRAME_MS;
   sim.lastHurtMs = sim.nowMs;
   sim.knockVX = 0;
   sim.knockVY = 0;
@@ -1350,4 +1928,20 @@ export function reviveRun(sim: Sim): boolean {
 export function forfeitRevive(sim: Sim): void {
   if (sim.run !== "lose") return;
   sim.reviveAvailable = false;
+}
+
+export function isReviveHolding(sim: Sim): boolean {
+  return sim.reviveHoldUntilMs > sim.nowMs;
+}
+
+export function isReviveInvulnerable(sim: Sim): boolean {
+  return sim.reviveGraceUntilMs > sim.nowMs;
+}
+
+export function reviveHoldRemainingMs(sim: Sim): number {
+  return Math.max(0, sim.reviveHoldUntilMs - sim.nowMs);
+}
+
+export function reviveGraceRemainingMs(sim: Sim): number {
+  return Math.max(0, sim.reviveGraceUntilMs - sim.nowMs);
 }

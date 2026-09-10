@@ -1,8 +1,8 @@
 import type { HeroId, LevelId, TrackId } from "./types";
 
-/** 角色基础模板（资料片数值）。 */
+/** 角色基础模板（资料片数值）。攻速 10 点 = 旧 14 点基准攻速的 2/3。 */
 export const STAT_TEMPLATE = {
-  attackSpeed: 14,
+  attackSpeed: 10,
   dashRange: 10,
   attackRange: 10,
 } as const;

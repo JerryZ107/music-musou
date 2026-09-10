@@ -36,15 +36,17 @@ describe("meta progression", () => {
 });
 
 describe("createWavePlan", () => {
-  it("第一关不含中央尸王波", () => {
+  it("第一关：四院同出，不含中央尸王波", () => {
     const waves = createWavePlan({ n: 1 }, { includeFinalBoss: false });
-    expect(waves).toHaveLength(4);
+    expect(waves).toHaveLength(1);
+    expect(waves[0]?.filter((e) => e.kind === "boss")).toHaveLength(4);
     expect(waves.every((w) => !w.some((e) => e.kind === "megaboss"))).toBe(true);
   });
 
-  it("第二关含尸王决战", () => {
+  it("第二关：四院同出后再出尸王决战", () => {
     const waves = createWavePlan({ n: 1 }, { includeFinalBoss: true });
-    expect(waves).toHaveLength(5);
-    expect(waves[4]?.some((e) => e.kind === "megaboss")).toBe(true);
+    expect(waves).toHaveLength(2);
+    expect(waves[0]?.filter((e) => e.kind === "boss")).toHaveLength(4);
+    expect(waves[1]?.some((e) => e.kind === "megaboss")).toBe(true);
   });
 });

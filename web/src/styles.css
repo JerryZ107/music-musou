@@ -169,6 +169,21 @@ html.landscape-forced[data-phase="game"] .game-root {
   transform-origin: top left;
 }
 
+/** 菜单强制横屏：整备 / 商店 / 资料等同壳旋转 */
+html.landscape-forced[data-phase="menu"] .app-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: var(--forced-w, 100vh);
+  height: var(--forced-h, 100vw);
+  max-width: none;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  transform: rotate(90deg) translateY(calc(-1 * var(--forced-h, 100vw)));
+  transform-origin: top left;
+}
+
 .landscape-bar {
   position: sticky;
   top: 0;
@@ -630,6 +645,115 @@ html.landscape-forced[data-phase="game"] .game-root {
   position: relative;
   min-height: 0;
   touch-action: none;
+}
+
+.beat-timeline {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: min(92%, 640px);
+  height: 16px;
+  pointer-events: none;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(10, 12, 18, 0.72);
+  border: 1px solid rgba(200, 180, 140, 0.35);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+
+.beat-timeline__past {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, rgba(180, 140, 70, 0.22), rgba(220, 180, 100, 0.32));
+  pointer-events: none;
+}
+
+.beat-timeline__track {
+  position: absolute;
+  inset: 0;
+}
+
+.beat-timeline__beat {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 2px;
+  background: rgba(210, 190, 140, 0.45);
+  border: 1px solid rgba(230, 200, 120, 0.35);
+  box-sizing: border-box;
+}
+
+.beat-timeline__beat.is-skill-light {
+  background: rgba(72, 210, 120, 0.5);
+  border-color: rgba(120, 240, 160, 0.55);
+}
+
+.beat-timeline__beat.is-skill-mid {
+  background: rgba(240, 200, 60, 0.55);
+  border-color: rgba(255, 220, 100, 0.6);
+}
+
+.beat-timeline__beat.is-skill-heavy {
+  background: rgba(240, 110, 180, 0.5);
+  border-color: rgba(255, 150, 200, 0.6);
+}
+
+.beat-timeline__beat.is-hot {
+  background: rgba(255, 220, 120, 0.8);
+  border-color: rgba(255, 230, 160, 0.9);
+  box-shadow: 0 0 10px rgba(255, 200, 80, 0.7);
+}
+
+.beat-timeline__beat.is-skill-light.is-hot {
+  background: rgba(90, 245, 150, 0.88);
+  border-color: rgba(160, 255, 190, 0.95);
+  box-shadow: 0 0 10px rgba(80, 230, 140, 0.75);
+}
+
+.beat-timeline__beat.is-skill-mid.is-hot {
+  background: rgba(255, 230, 90, 0.9);
+  border-color: rgba(255, 240, 150, 0.95);
+  box-shadow: 0 0 10px rgba(255, 210, 70, 0.8);
+}
+
+.beat-timeline__beat.is-skill-heavy.is-hot {
+  background: rgba(255, 130, 200, 0.88);
+  border-color: rgba(255, 180, 220, 0.95);
+  box-shadow: 0 0 10px rgba(240, 100, 180, 0.8);
+}
+
+.beat-timeline__hit {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 2px;
+  margin-left: -1px;
+  background: #9ec8ff;
+  box-shadow: 0 0 4px rgba(140, 190, 255, 0.7);
+  z-index: 1;
+}
+
+.beat-timeline__hit.is-onbeat {
+  background: #9ef0c0;
+  box-shadow: 0 0 5px rgba(120, 230, 170, 0.75);
+}
+
+.beat-timeline__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff0c8;
+  box-shadow: 0 0 8px rgba(255, 230, 160, 0.75);
+  z-index: 2;
+}
+
+.beat-timeline--zone {
+  border-color: rgba(255, 210, 120, 0.6);
+  box-shadow: 0 0 14px rgba(255, 190, 80, 0.28);
 }
 
 .pixi-host {
@@ -1312,6 +1436,38 @@ html.landscape-forced[data-phase="game"] .game-root {
   font-size: 13px;
   color: #a8b8c8;
   line-height: 1.45;
+}
+
+.overlay.revive-countdown {
+  z-index: 40;
+  pointer-events: none;
+  background: rgba(6, 8, 14, 0.55);
+}
+
+.revive-countdown-card {
+  text-align: center;
+  padding: 12px 20px;
+}
+
+.revive-countdown-lede {
+  margin: 0 0 6px;
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  color: #ffd0a0;
+}
+
+.revive-countdown-num {
+  font-size: clamp(64px, 18vw, 96px);
+  font-weight: 700;
+  line-height: 1;
+  color: #fff6c8;
+  text-shadow: 0 0 24px rgba(255, 180, 80, 0.45);
+}
+
+.revive-countdown-sub {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #a8b8c8;
 }
 
 .overlay.ad-revive {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ACTION_COOLDOWN_MS, MINION_HP, MINION_RADIUS, SLIDE_DURATION_MS, ULTIMATE_BEAT_CHARGES } from "./constants";
-import { HERO_ULT_DURATION_MS, SAMURAI_ULT_ONBEAT_DAMAGE_BONUS, SPEAR_ULT_ATTACK_CHARGES } from "./heroStats";
+import { ACTION_COOLDOWN_MS, MINION_HP, MINION_RADIUS, SAMURAI_BASIC_WAVE_WIDTH, SAMURAI_TORNADO_IMPACT_DAMAGE, SAMURAI_TORNADO_TICK_DAMAGE, SAMURAI_TORNADO_TICK_MS, SLIDE_DURATION_MS, ULTIMATE_BEAT_CHARGES } from "./constants";
+import { SPEAR_ULT_ATTACK_CHARGES, attackRadiusFor } from "./heroStats";
 import { createSim, doAttack, doSlide, doUltimate, reviveRun, stepSim } from "./sim";
+import type { OrbitSword } from "./types";
 
 describe("????", () => {
   it("??????????????", () => {
@@ -19,12 +20,34 @@ describe("????", () => {
       },
     ];
     doAttack(sim, false);
-    expect(sim.enemies[0]?.hp).toBe(1);
+    stepSim(sim, 50, 0, 0);
+    expect(sim.enemies[0]?.hp).toBe(MINION_HP - 2);
     expect(sim.energy).toBe(0);
     sim.lastAttackMs = -9999;
     doAttack(sim, false);
+    stepSim(sim, 50, 0, 0);
     expect(sim.enemies).toHaveLength(0);
     expect(sim.run).toBe("win");
+  });
+
+  it("未卡拍滑步仍释放普通普攻", () => {
+    const sim = createSim({ levelId: 1, trackId: 1, weaponId: 1, tutorial: true });
+    sim.run = "playing";
+    sim.enemies = [
+      {
+        id: 1,
+        kind: "minion",
+        x: sim.player.x + 0.8,
+        y: sim.player.y,
+        r: MINION_RADIUS,
+        hp: MINION_HP,
+        maxHp: MINION_HP,
+      },
+    ];
+    expect(doSlide(sim, false, 1, 0)).toBe(true);
+    stepSim(sim, 50, 0, 0);
+    expect(sim.enemies[0]?.hp).toBe(MINION_HP - 2);
+    expect(sim.energy).toBe(0);
   });
 
   it("Beat-On Hit ????????", () => {
@@ -42,8 +65,20 @@ describe("????", () => {
       },
     ];
     doAttack(sim, true);
-    expect(sim.enemies).toHaveLength(0);
+    stepSim(sim, 50, 0, 0);
+    expect(sim.enemies[0]?.hp).toBe(MINION_HP - 2);
     expect(sim.energy).toBe(1);
+  });
+
+  it("武士普攻为小幅剑气：1 发、伤害 2、射程对齐枪兵", () => {
+    const sim = createSim({ levelId: 1, trackId: 1, weaponId: 1, tutorial: true });
+    sim.run = "playing";
+    doAttack(sim, false);
+    const waves = sim.bullets.filter((b) => b.style === "swordWave");
+    expect(waves).toHaveLength(1);
+    expect(waves[0]?.damage).toBe(2);
+    expect(waves[0]?.r).toBeCloseTo(SAMURAI_BASIC_WAVE_WIDTH / 2);
+    expect(waves[0]?.maxRange).toBeCloseTo(attackRadiusFor(2));
   });
 
   it("????????", () => {
@@ -159,60 +194,135 @@ describe("????", () => {
     expect(doAttack(sim, false)).toBe(true);
   });
 
-  it("beat hit grants samurai shield", () => {
+  it("飞剑护盾按伤害量连扣，1 剑挡 1 血", () => {
     const sim = createSim({ levelId: 1, trackId: 1, weaponId: 1, tutorial: true });
-    expect(sim.shieldHp).toBe(0);
     sim.run = "playing";
-    sim.pendingWaves = [[]];
-    sim.enemies = [
-      {
-        id: 1,
-        kind: "minion",
-        x: sim.player.x + 0.5,
-        y: sim.player.y,
-        r: MINION_RADIUS,
-        hp: MINION_HP + 2,
-        maxHp: MINION_HP + 2,
-      },
-    ];
-    doAttack(sim, true);
-    expect(sim.shieldHp).toBe(1);
-    sim.enemies = [
-      {
-        id: 2,
-        kind: "minion",
-        x: sim.player.x + 0.2,
-        y: sim.player.y,
-        r: MINION_RADIUS,
-        hp: MINION_HP,
-        maxHp: MINION_HP,
-      },
-    ];
+    const mkSword = (id: number): OrbitSword => ({
+      id,
+      x: sim.player.x,
+      y: sim.player.y,
+      r: 0.9,
+      angle: 0,
+      omega: 1,
+      orbitR: 5,
+      untilMs: sim.nowMs + 8000,
+      damage: 2,
+      lastHitMs: new Map(),
+    });
+    sim.orbitSwords = [mkSword(1), mkSword(2)];
+    sim.player.x = 10;
+    sim.player.y = 10;
+    const boss = {
+      id: 1,
+      kind: "boss" as const,
+      x: sim.player.x + 0.5,
+      y: sim.player.y,
+      r: 0.78,
+      hp: 24,
+      maxHp: 24,
+      windupUntil: 500,
+      strikeUntil: 700,
+      attackKind: "lunge" as const,
+      attackX: -1,
+      attackY: 0,
+      attackRadius: 0.85,
+      lungeDist: 0.6,
+      lungeTraveled: 0,
+      lungeSpeed: 8,
+      lungeFromX: sim.player.x + 0.5,
+      lungeFromY: sim.player.y,
+      lungeToX: sim.player.x - 0.1,
+      lungeToY: sim.player.y,
+      lungeHit: false,
+    };
+    sim.enemies = [boss];
+    sim.nowMs = 600;
     const hp = sim.player.hp;
     stepSim(sim, 16, 0, 0);
+    // boss 突刺 2 伤，2 把飞剑全挡
+    expect(sim.orbitSwords).toHaveLength(0);
     expect(sim.player.hp).toBe(hp);
-    expect(sim.shieldHp).toBe(0);
   });
 
-  it("samurai berserk adds on-beat damage", () => {
+  it("飞剑不足时溢出伤害扣血", () => {
+    const sim = createSim({ levelId: 1, trackId: 1, weaponId: 1, tutorial: true });
+    sim.run = "playing";
+    sim.orbitSwords = [
+      {
+        id: 1,
+        x: sim.player.x,
+        y: sim.player.y,
+        r: 0.9,
+        angle: 0,
+        omega: 1,
+        orbitR: 5,
+        untilMs: sim.nowMs + 8000,
+        damage: 2,
+        lastHitMs: new Map(),
+      },
+    ];
+    sim.player.x = 10;
+    sim.player.y = 10;
+    const boss = {
+      id: 1,
+      kind: "boss" as const,
+      x: sim.player.x + 0.5,
+      y: sim.player.y,
+      r: 0.78,
+      hp: 24,
+      maxHp: 24,
+      windupUntil: 500,
+      strikeUntil: 700,
+      attackKind: "lunge" as const,
+      attackX: -1,
+      attackY: 0,
+      attackRadius: 0.85,
+      lungeDist: 0.6,
+      lungeTraveled: 0,
+      lungeSpeed: 8,
+      lungeFromX: sim.player.x + 0.5,
+      lungeFromY: sim.player.y,
+      lungeToX: sim.player.x - 0.1,
+      lungeToY: sim.player.y,
+      lungeHit: false,
+    };
+    sim.enemies = [boss];
+    sim.nowMs = 600;
+    const hp = sim.player.hp;
+    stepSim(sim, 16, 0, 0);
+    expect(sim.orbitSwords).toHaveLength(0);
+    expect(sim.player.hp).toBe(hp - 1);
+  });
+  it("武士怒气大招放出矮龙卷", () => {
     const sim = createSim({ levelId: 1, trackId: 1, weaponId: 1, tutorial: true });
     sim.run = "playing";
     sim.energy = ULTIMATE_BEAT_CHARGES;
-    expect(doUltimate(sim)).toBe(true);
-    expect(sim.ultBuffUntilMs).toBe(HERO_ULT_DURATION_MS);
     sim.enemies = [
       {
         id: 1,
         kind: "minion",
-        x: sim.player.x + 0.5,
+        x: sim.player.x + 8,
         y: sim.player.y,
         r: MINION_RADIUS,
-        hp: 10,
-        maxHp: 10,
+        hp: 100,
+        maxHp: 100,
       },
     ];
-    doAttack(sim, true);
-    expect(sim.enemies[0]?.hp).toBe(10 - (2 + SAMURAI_ULT_ONBEAT_DAMAGE_BONUS));
+    expect(doUltimate(sim)).toBe(true);
+    expect(sim.energy).toBe(0);
+    expect(sim.tornados).toHaveLength(1);
+    expect(sim.tornados[0]?.seeking).toBe(true);
+    for (let i = 0; i < 80; i++) {
+      stepSim(sim, 16, 0, 0);
+      if (sim.tornados[0] && !sim.tornados[0].seeking) break;
+    }
+    const twister = sim.tornados[0];
+    expect(twister?.seeking).toBe(false);
+    expect(twister?.impactDone).toBe(true);
+    // 刚撞上：冲击 5；尚未转满一圈则不应再掉血
+    expect(sim.enemies[0]!.hp).toBe(100 - SAMURAI_TORNADO_IMPACT_DAMAGE);
+    stepSim(sim, Math.ceil(SAMURAI_TORNADO_TICK_MS) + 1, 0, 0);
+    expect(sim.enemies[0]!.hp).toBe(100 - SAMURAI_TORNADO_IMPACT_DAMAGE - SAMURAI_TORNADO_TICK_DAMAGE);
   });
 
   it("spear ult grants 7 enhanced attacks without charging energy", () => {
@@ -308,15 +418,42 @@ describe("????", () => {
     expect(boss.lungeHit).toBe(true);
   });
 
-  it("?????? playing ?????", () => {
+  it("revive holds combat then grants iframe", () => {
     const sim = createSim({ levelId: 1, trackId: 1, weaponId: 2, tutorial: true });
     sim.run = "lose";
     sim.player.hp = 0;
+    sim.nowMs = 1000;
     expect(reviveRun(sim)).toBe(true);
     expect(sim.run).toBe("playing");
     expect(sim.player.hp).toBe(3);
     expect(sim.reviveAvailable).toBe(false);
+    expect(sim.reviveHoldUntilMs).toBe(4000);
+    expect(sim.reviveGraceUntilMs).toBe(5000);
     expect(reviveRun(sim)).toBe(false);
+
+    const hp = sim.player.hp;
+    sim.enemies = [
+      {
+        id: 1,
+        kind: "minion",
+        x: sim.player.x,
+        y: sim.player.y,
+        r: 0.4,
+        hp: 3,
+        maxHp: 3,
+      },
+    ];
+    stepSim(sim, 16, 1, 0);
+    expect(sim.nowMs).toBe(1016);
+    expect(sim.player.x).toBe(sim.spawnX); // frozen during hold
+    expect(sim.player.hp).toBe(hp);
+
+    stepSim(sim, 3000, 0, 0);
+    expect(sim.nowMs).toBeGreaterThanOrEqual(4000);
+    // still in post-revive iframe
+    const hp2 = sim.player.hp;
+    stepSim(sim, 16, 0, 0);
+    expect(sim.player.hp).toBe(hp2);
   });
 
   it("??????????????", () => {

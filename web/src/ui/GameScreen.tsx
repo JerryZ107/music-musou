@@ -4,7 +4,7 @@ import type { HudSnapshot, RunResult, LevelId, TrackId, WeaponId } from "../game
 import type { FirstClearGuideStep } from "../game/onboarding";
 import { copyShareText } from "../game/runResult";
 import { waitForPlayfieldLayout } from "../utils/waitForPlayfieldLayout";
-import { BottomHud, FieldOverlay, TopBar, type HudHandlers } from "./Hud";
+import { BottomHud, BeatTimelineBar, FieldOverlay, TopBar, type HudHandlers } from "./Hud";
 import { LandscapeModeToggle } from "./LandscapeModeToggle";
 import { ReviveAdModal } from "./ReviveAdModal";
 import { TouchControls } from "./TouchControls";
@@ -234,6 +234,7 @@ export function GameScreen(props: {
       )}
       {hudProps && <TopBar {...hudProps} />}
       <div className="playfield">
+        {hud && <BeatTimelineBar hud={hud} />}
         <div className="pixi-host" ref={hostRef} />
         {booting && (
           <div className="overlay">
@@ -272,6 +273,7 @@ export function GameScreen(props: {
         {mobilePlay &&
           hud &&
           !hud.paused &&
+          !(hud.reviveHoldMs > 0) &&
           hud.run !== "lose" &&
           hud.run !== "win" &&
           (hud.run === "playing" || hud.run === "tutorial") && (

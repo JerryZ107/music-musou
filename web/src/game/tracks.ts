@@ -1,10 +1,11 @@
-import { regularBeatGrid } from "./beatClock";
+import { regularBeatGrid, withRegularPulseBeats } from "./beatClock";
+import { assignBeatSkillTiers } from "./beatSkill";
 import track1Beats from "./track-1-beats.json";
 import track2Beats from "./track-2-beats.json";
 import track3Beats from "./track-3-beats.json";
 import type { HeroId, MusicProfile, TrackId } from "./types";
 
-/** 从录音 beat_track 分析得到的拍点（与 MP3 对齐，不做 BPM 放慢）。 */
+/** 清晰升降调小包顶点作主拍（不问音量/鼓）；规律脉冲只补空档。 */
 function analyzedAudioProfile(
   trackId: TrackId,
   name: string,
@@ -18,14 +19,21 @@ function analyzedAudioProfile(
   },
   audioUrl: string,
 ): MusicProfile {
+  const { beatTimesMs, pulsePeriodMs } = withRegularPulseBeats(
+    data.beatTimesMs,
+    data.durationMs,
+    data.bpm,
+  );
   return {
     trackId,
     name,
     composer,
     bpmLabel: data.bpm,
-    beatTimesMs: data.beatTimesMs,
+    beatTimesMs,
+    beatSkillTiers: assignBeatSkillTiers(beatTimesMs.length, trackId),
     loopMs: data.durationMs,
-    loopBeats: data.beatTimesMs.length,
+    loopBeats: beatTimesMs.length,
+    pulsePeriodMs,
     style: "dance",
     synth: "melody",
     audioUrl,
@@ -61,25 +69,25 @@ export const HEROES: Record<
     id: 1,
     name: "铁铠武士",
     short: "武士",
-    desc: "攻速 14 · 冲刺 15 · 攻击范围 10",
-    passive: "强化普攻命中获 1 层护盾；常态冲刺距离 +5",
-    ult: "狂暴 12 秒：强化普攻 +2 伤，冲刺 15→20",
+    desc: "攻速 8 · 冲刺 15 · 攻击范围 15 · 节拍三技能",
+    passive: "普攻小剑气；飞剑护盾挡伤；常态冲刺距离 +5",
+    ult: "怒气大招：寻敌矮龙卷（圆心撞停 3s，冲击 5 / 每圈 3）",
   },
   2: {
     id: 2,
     name: "青衫枪客",
     short: "枪客",
-    desc: "攻速 20 · 冲刺 10 · 攻击范围 15",
+    desc: "攻速 14 · 冲刺 10 · 攻击范围 15",
     passive: "小范围横扫；卡拍扇面更宽",
-    ult: "游龙 7 次：横扫改突刺，+1 伤 +2 攻速，不计充能",
+    ult: "游龙 7 次：横扫改突刺，+1 伤 +1 攻速，不计充能",
   },
   3: {
     id: 3,
     name: "灵耳弓使",
     short: "弓使",
-    desc: "攻速 20 · 冲刺 10 · 弹程 40",
-    passive: "强化普攻为爆裂箭，小范围 2 点伤害",
-    ult: "留下分身协同射箭（1 伤，无爆裂，1 HP）",
+    desc: "攻速 14 · 冲刺 10 · 弹程 40 · 节拍三技能",
+    passive: "绿爆裂·黄寒冰（×2 / 三发散）/ 粉分身",
+    ult: "雷电箭×4：5 伤+眩晕，再外扩慢速电波（同弹程 / 2 伤）",
   },
 };
 

@@ -8,15 +8,15 @@ export const LEVELS: Record<
     id: 1,
     name: "四角院落",
     short: "第一关",
-    desc: "四座院落逐波清场，无中央尸王。",
-    waves: "4 波",
+    desc: "四座院落同时开战，无中央尸王。",
+    waves: "1 波",
   },
   2: {
     id: 2,
     name: "中央决战",
     short: "第二关",
-    desc: "完整五波，中央广场尸王与王中王终局。",
-    waves: "5 波 · 尸王",
+    desc: "四院同出，清完后再迎中央尸王与王中王。",
+    waves: "2 波 · 尸王",
   },
 };
 

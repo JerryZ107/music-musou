@@ -1,4 +1,12 @@
-import { BEAT_SILVER_PRE_MS, BEAT_WINDOW_MS, HUD_GRACE_MS } from "./constants";
+import {
+  BEAT_SILVER_PRE_MS,
+  BEAT_WINDOW_MS,
+  HUD_GRACE_MS,
+  PULSE_DEDUP_MS,
+  PULSE_PERIOD_MAX_MS,
+  PULSE_PERIOD_MIN_MS,
+} from "./constants";
+import { assignBeatSkillTiers, type BeatSkillTier } from "./beatSkill";
 import type { MusicProfile } from "./types";
 
 /** loop 内时间 t 到最近拍点的最短距离（毫秒）。 */
@@ -30,9 +38,104 @@ function offsetFromNearestBeat(
   return { offsetMs: bestOffset };
 }
 
+/** 相邻拍间隔中位数，比 loop/拍数 更适合不规则/onset 解析曲。 */
+export function medianBeatPeriod(beats: readonly number[], loopMs: number): number {
+  if (beats.length < 2) return loopMs / Math.max(1, beats.length);
+  const gaps: number[] = [];
+  for (let i = 0; i < beats.length; i++) {
+    const start = beats[i]!;
+    const end = i + 1 < beats.length ? beats[i + 1]! : loopMs;
+    gaps.push(end - start);
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] ?? loopMs / beats.length;
+}
+
+/**
+ * 选取落在 [0.67s, 1s] 的规律脉冲周期。
+ * 优先：2×中位间隔（半拍格）、再 BPM 半拍/整拍，并钳到目标区间。
+ */
+export function choosePulsePeriodMs(bpm: number, medianGapMs: number): number {
+  const quarter = 60_000 / Math.max(1, bpm);
+  const candidates = [medianGapMs * 2, medianGapMs, quarter * 2, quarter].filter(
+    (p) => p >= PULSE_PERIOD_MIN_MS && p <= PULSE_PERIOD_MAX_MS,
+  );
+  if (candidates.length) {
+    const mid = (PULSE_PERIOD_MIN_MS + PULSE_PERIOD_MAX_MS) / 2;
+    return candidates.reduce((a, b) => (Math.abs(a - mid) <= Math.abs(b - mid) ? a : b));
+  }
+  const half = quarter * 2;
+  return Math.max(PULSE_PERIOD_MIN_MS, Math.min(PULSE_PERIOD_MAX_MS, half));
+}
+
+/** 选与现有拍点相位最吻合的脉冲起点。 */
+export function bestPulseOffsetMs(
+  beats: readonly number[],
+  periodMs: number,
+): number {
+  if (beats.length === 0 || periodMs <= 0) return 0;
+  const candidates = new Set<number>();
+  const sample = Math.min(beats.length, 48);
+  for (let i = 0; i < sample; i++) {
+    const b = beats[i]!;
+    candidates.add(((b % periodMs) + periodMs) % periodMs);
+  }
+  let best = 0;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const off of candidates) {
+    let score = 0;
+    for (const b of beats) {
+      const phase = (((b - off) % periodMs) + periodMs) % periodMs;
+      const d = Math.min(phase, periodMs - phase);
+      score -= d;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = off;
+    }
+  }
+  return best;
+}
+
+/**
+ * 在原拍点上按规律脉冲额外补点：格点附近已有拍则不重设，原拍全部保留。
+ */
+export function augmentBeatsWithRegularPulse(
+  beats: readonly number[],
+  loopMs: number,
+  periodMs: number,
+  offsetMs: number,
+  dedupMs = PULSE_DEDUP_MS,
+): number[] {
+  const out = [...beats].filter((t) => t >= 0 && t < loopMs).sort((a, b) => a - b);
+  if (periodMs <= 0 || loopMs <= 0) return out;
+  let t = ((offsetMs % periodMs) + periodMs) % periodMs;
+  // 避免 offset==0 时漏掉与 loop 重合的末拍：只铺 [0, loop)
+  for (; t < loopMs - 1e-6; t += periodMs) {
+    if (distToNearestBeat(t, out, loopMs) > dedupMs) {
+      out.push(Math.round(t * 1000) / 1000);
+    }
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/** 为曲目生成：保留原拍 + 0.67～1s 脉冲补点。 */
+export function withRegularPulseBeats(
+  beats: readonly number[],
+  loopMs: number,
+  bpm: number,
+): { beatTimesMs: number[]; pulsePeriodMs: number } {
+  const medianGap = medianBeatPeriod(beats, loopMs);
+  const pulsePeriodMs = choosePulsePeriodMs(bpm, medianGap);
+  const offsetMs = bestPulseOffsetMs(beats, pulsePeriodMs);
+  const beatTimesMs = augmentBeatsWithRegularPulse(beats, loopMs, pulsePeriodMs, offsetMs);
+  return { beatTimesMs, pulsePeriodMs };
+}
+
 export class BeatGridClock {
   loopMs: number;
   beatTimesMs: number[];
+  beatSkillTiers: BeatSkillTier[];
   periodMs: number;
   beatWindowMs: number;
   audioLatencyMs: number;
@@ -40,7 +143,11 @@ export class BeatGridClock {
   constructor(profile: MusicProfile, beatWindowMs = BEAT_WINDOW_MS, audioLatencyMs = 0) {
     this.loopMs = profile.loopMs;
     this.beatTimesMs = [...profile.beatTimesMs];
-    this.periodMs = medianBeatPeriod(this.beatTimesMs, profile.loopMs);
+    this.beatSkillTiers =
+      profile.beatSkillTiers && profile.beatSkillTiers.length === this.beatTimesMs.length
+        ? [...profile.beatSkillTiers]
+        : assignBeatSkillTiers(this.beatTimesMs.length, profile.trackId);
+    this.periodMs = profile.pulsePeriodMs ?? medianBeatPeriod(this.beatTimesMs, profile.loopMs);
     this.beatWindowMs = beatWindowMs;
     this.audioLatencyMs = audioLatencyMs;
   }
@@ -54,8 +161,8 @@ export class BeatGridClock {
       return;
     }
     this.beatTimesMs = this.beatTimesMs.map((t) => t * scale);
+    this.periodMs *= scale;
     this.loopMs = audioDurationMs;
-    this.periodMs = medianBeatPeriod(this.beatTimesMs, this.loopMs);
   }
 
   tLoop(timelineMs: number): number {
@@ -96,14 +203,9 @@ export class BeatGridClock {
     });
   }
 
-  /** 强普判定区：银环亮起 → 金环结束（全英雄通用）。 */
+  /** 强普判定区：仅金环（银环只作预警）。 */
   combatBeatZone(timelineMs: number): boolean {
-    const half = this.goldHalfMs();
-    const t = this.tLoop(timelineMs);
-    return this.beatTimesMs.some((beat) => {
-      const offset = this.offsetForBeat(t, beat);
-      return offset >= -(half + BEAT_SILVER_PRE_MS) && offset <= half;
-    });
+    return this.hudInZone(timelineMs);
   }
 
   /** 当前在相邻两拍之间的进度 0→1（用于节拍条游标）。 */
@@ -171,17 +273,28 @@ export class BeatGridClock {
     return 0;
   }
 
-  beatSlotKey(timelineMs: number): string {
+  /**
+   * 金环归属拍槽。重合区内优先更早的拍；已消耗的拍跳过，顺延到下一重合拍，
+   * 从而可在连续重合金环内连出多段强普。
+   */
+  beatSlotKey(timelineMs: number, consumedSlots: ReadonlySet<string> | null = null): string {
     const loop = Math.floor(timelineMs / this.loopMs);
     const t = this.tLoop(timelineMs);
     const beats = this.beatTimesMs;
     const n = beats.length;
     if (n === 0) return `${loop}:0`;
     const half = this.goldHalfMs();
-    const combatPre = half + BEAT_SILVER_PRE_MS;
+    const hits: number[] = [];
     for (let i = 0; i < n; i++) {
       const offset = this.offsetForBeat(t, beats[i]!);
-      if (offset >= -combatPre && offset <= half) return `${loop}:${i}`;
+      if (offset >= -half && offset <= half) hits.push(i);
+    }
+    if (hits.length > 0) {
+      for (const i of hits) {
+        const key = `${loop}:${i}`;
+        if (!consumedSlots?.has(key)) return key;
+      }
+      return `${loop}:${hits[hits.length - 1]!}`;
     }
     let bestIdx = 0;
     let bestDist = Infinity;
@@ -195,19 +308,6 @@ export class BeatGridClock {
     }
     return `${loop}:${bestIdx}`;
   }
-}
-
-/** 相邻拍间隔中位数，比 loop/拍数 更适合不规则/onset 解析曲。 */
-function medianBeatPeriod(beats: readonly number[], loopMs: number): number {
-  if (beats.length < 2) return loopMs / Math.max(1, beats.length);
-  const gaps: number[] = [];
-  for (let i = 0; i < beats.length; i++) {
-    const start = beats[i]!;
-    const end = i + 1 < beats.length ? beats[i + 1]! : loopMs;
-    gaps.push(end - start);
-  }
-  gaps.sort((a, b) => a - b);
-  return gaps[Math.floor(gaps.length / 2)] ?? loopMs / beats.length;
 }
 
 export function regularBeatGrid(

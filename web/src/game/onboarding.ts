@@ -7,8 +7,11 @@ export type FirstClearGuideStep =
   | "shop_archer"
   | "shop_buy"
   | "shop_back"
+  /** @deprecated 旧存档兼容；读档时归并为 done */
   | "select_archer"
+  /** @deprecated 旧存档兼容；读档时归并为 done */
   | "select_track"
+  /** @deprecated 旧存档兼容；读档时归并为 done */
   | "select_level2"
   | "done";
 
@@ -21,9 +24,6 @@ const GUIDE_ORDER: FirstClearGuideStep[] = [
   "shop_archer",
   "shop_buy",
   "shop_back",
-  "select_archer",
-  "select_track",
-  "select_level2",
   "done",
 ];
 
@@ -35,16 +35,38 @@ const SHOP_GUIDE_STEPS: FirstClearGuideStep[] = [
   "shop_back",
 ];
 
+/** 已改为自动切关/切曲，不再逐步引导 */
+const LEGACY_SELECT_GUIDE_STEPS: FirstClearGuideStep[] = [
+  "select_archer",
+  "select_track",
+  "select_level2",
+];
+
 export function isShopGuideStep(step: FirstClearGuideStep | null | undefined): boolean {
   return step != null && SHOP_GUIDE_STEPS.includes(step);
 }
 
+export function isLegacySelectGuideStep(step: FirstClearGuideStep | null | undefined): boolean {
+  return step != null && LEGACY_SELECT_GUIDE_STEPS.includes(step);
+}
+
+/** 读档时把旧「选曲/选关/选弓使」步骤收成 done。 */
+export function normalizeGuideStep(
+  step: FirstClearGuideStep | null | undefined,
+): FirstClearGuideStep | null {
+  if (step == null) return null;
+  if (isLegacySelectGuideStep(step)) return "done";
+  return step;
+}
+
 export function isFirstClearGuideActive(step: FirstClearGuideStep | null | undefined): boolean {
-  return step != null && step !== "done";
+  const n = normalizeGuideStep(step);
+  return n != null && n !== "done";
 }
 
 export function advanceFirstClearGuide(step: FirstClearGuideStep): FirstClearGuideStep {
-  const i = GUIDE_ORDER.indexOf(step);
+  const cur = normalizeGuideStep(step) ?? "done";
+  const i = GUIDE_ORDER.indexOf(cur);
   if (i < 0 || i >= GUIDE_ORDER.length - 1) return "done";
   return GUIDE_ORDER[i + 1]!;
 }
@@ -60,13 +82,7 @@ export function guideStepLabel(step: FirstClearGuideStep): string {
     case "shop_buy":
       return "点击招募弓使";
     case "shop_back":
-      return "点击返回装备继续整备";
-    case "select_archer":
-      return "选择弓使出征";
-    case "select_track":
-      return "选择新解锁的第二首曲子";
-    case "select_level2":
-      return "选择第二关出征";
+      return "点击返回继续整备";
     default:
       return "";
   }

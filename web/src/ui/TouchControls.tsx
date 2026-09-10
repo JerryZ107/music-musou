@@ -12,6 +12,7 @@ function tapButton(fn: () => void) {
 
 export function TouchControls(props: {
   ultReady: boolean;
+  showUlt?: boolean;
   tutorial: boolean;
   gameOver: boolean;
   onMove: (x: number, y: number) => void;
@@ -116,15 +117,17 @@ export function TouchControls(props: {
         </div>
 
         <div className="touch-actions">
-          <button
-            type="button"
-            className={props.ultReady ? "act-btn ult ready" : "act-btn ult"}
-            aria-label="大招"
-            onPointerDown={tapButton(props.onUlt)}
-          >
-            <span className="act-icon">★</span>
-            <span className="act-label">大招</span>
-          </button>
+          {props.showUlt !== false && (
+            <button
+              type="button"
+              className={props.ultReady ? "act-btn ult ready" : "act-btn ult"}
+              aria-label="大招"
+              onPointerDown={tapButton(props.onUlt)}
+            >
+              <span className="act-icon">★</span>
+              <span className="act-label">大招</span>
+            </button>
+          )}
           <button
             type="button"
             className="act-btn slide"

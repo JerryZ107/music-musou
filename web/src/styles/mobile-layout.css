@@ -17,6 +17,13 @@ html[data-touch="1"][data-phase="menu"] .app-menu {
   padding-bottom: max(72px, calc(var(--safe-b) + 56px));
 }
 
+html.landscape-forced[data-touch="1"][data-phase="menu"] .app-menu {
+  min-height: 0;
+  height: var(--forced-h, 100vw);
+  max-height: var(--forced-h, 100vw);
+  box-sizing: border-box;
+}
+
 html[data-touch="1"][data-phase="menu"] .screen h1 {
   font-size: clamp(18px, 4.5vw, 24px);
 }
@@ -179,6 +186,17 @@ html.landscape-forced[data-touch="1"][data-phase="game"] .game-root {
 
 html.landscape-forced[data-touch="1"][data-phase="game"] .bottom-hud {
   padding-bottom: 2px;
+}
+
+html[data-touch="1"][data-phase="game"] .beat-timeline {
+  top: 6px;
+  width: min(96%, 560px);
+  height: 12px;
+}
+
+html.landscape-forced[data-touch="1"][data-phase="game"] .beat-timeline {
+  top: 4px;
+  height: 10px;
 }
 
 html[data-touch="1"][data-phase="game"] .top-bar {

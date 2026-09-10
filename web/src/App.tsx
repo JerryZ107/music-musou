@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useLandscapeMode, syncForcedLandscapeShell, readLandscapeModePref } from "./hooks/useLandscapeMode";
-import { primeGameLayoutShell, useLayoutShell } from "./hooks/useLayoutShell";
+import { useLandscapeMode } from "./hooks/useLandscapeMode";
+import { useLayoutShell } from "./hooks/useLayoutShell";
 import {
   applyRunRewards,
   clearSlot,
@@ -15,6 +15,7 @@ import {
   SaveStorageError,
   upsertAccount,
   writeSlot,
+  readSlot,
   type AccountData,
   type SlotData,
 } from "./game/save";
@@ -34,11 +35,17 @@ function MenuShell(props: {
   touch: boolean;
   portrait: boolean;
   landscapeForced: boolean;
+  /** 存档/整备/商城顶栏已有横屏按钮时，不再用顶栏条/右下角芯片 */
+  headerHasLandscape?: boolean;
   saveError?: string | null;
   onEnableLandscape: () => void;
   onDisableLandscape: () => void;
   children: ReactNode;
 }) {
+  const showBar =
+    props.touch &&
+    !props.headerHasLandscape &&
+    (props.portrait || props.landscapeForced);
   return (
     <div className="app-menu">
       {props.saveError && (
@@ -46,7 +53,7 @@ function MenuShell(props: {
           {props.saveError}
         </div>
       )}
-      {props.touch && props.portrait && !props.landscapeForced && (
+      {showBar && (
         <LandscapeModeToggle
           active={props.landscapeForced}
           portrait={props.portrait}
@@ -56,15 +63,6 @@ function MenuShell(props: {
         />
       )}
       {props.children}
-      {props.touch && (props.portrait || props.landscapeForced) && (
-        <LandscapeModeToggle
-          active={props.landscapeForced}
-          portrait={props.portrait}
-          variant="chip"
-          onEnable={props.onEnableLandscape}
-          onDisable={props.onDisableLandscape}
-        />
-      )}
     </div>
   );
 }
@@ -80,14 +78,13 @@ export function App() {
   const [touch] = useState(isTouchDevice);
   const menuBgmRef = useRef<MenuBgmPlayer | null>(null);
   if (!menuBgmRef.current) menuBgmRef.current = new MenuBgmPlayer();
-  const { portrait, forced, effectiveLandscape, enable, disable } = useLandscapeMode(
-    phase === "game",
-    touch,
-  );
+  const { portrait, forced, effectiveLandscape, enable, disable } = useLandscapeMode(true, false);
   const layoutPhase = phase === "game" ? "game" : "menu";
+  // 菜单在强制横屏时按横屏壳布局；战斗仍用物理朝向驱动提示
+  const layoutPortrait = phase === "game" ? portrait : !effectiveLandscape;
   useLayoutShell({
     touch,
-    portrait,
+    portrait: layoutPortrait,
     landscapeReady: phase === "game" ? effectiveLandscape : true,
     phase: layoutPhase,
   });
@@ -168,7 +165,7 @@ export function App() {
     }
     // 已拥有弓使时跳过整段商店引导
     if (isShopGuideStep(next) && getSlotMeta(accountName, slotIndex).unlockedHeroes.includes(3)) {
-      next = "select_track";
+      next = "done";
     }
     setFirstClearGuideStep(accountName, slotIndex, next);
     refreshAccounts();
@@ -182,8 +179,9 @@ export function App() {
   const exitToSelect = () => {
     setRunResult(null);
     if (accountName) {
+      const slot = readSlot(accountName, slotIndex);
       const m = getSlotMeta(accountName, slotIndex);
-      setDraft((d) => sanitizeSlotDraft(d, m));
+      if (slot) setDraft(sanitizeSlotDraft(slot, m));
     }
     setPhase("select");
   };
@@ -224,16 +222,7 @@ export function App() {
   const startGame = () => {
     if (!accountName) return;
     primeAudioFromUserGesture();
-    const wantForce = touch && portrait;
-    let willForce = forced || readLandscapeModePref(touch);
-    if (wantForce && !willForce) {
-      enable();
-      willForce = true;
-    }
-    if (wantForce && willForce) {
-      primeGameLayoutShell({ touch, portrait, landscapeReady: true });
-      syncForcedLandscapeShell(true, true);
-    }
+    // 出征不自动横屏：竖屏进战斗后由全屏提示按钮开启
     writeSlot(accountName, slotIndex, draft);
     refreshAccounts();
     setRunResult(null);
@@ -253,6 +242,15 @@ export function App() {
     onEnableLandscape: enable,
     onDisableLandscape: disable,
   };
+  const landscapeNav =
+    touch && (portrait || forced)
+      ? {
+          landscapeForced: forced,
+          portrait,
+          onEnableLandscape: enable,
+          onDisableLandscape: disable,
+        }
+      : null;
 
   if (phase === "account") {
     return (
@@ -271,9 +269,10 @@ export function App() {
       );
     }
     return (
-      <MenuShell {...menuProps}>
+      <MenuShell {...menuProps} headerHasLandscape={!!landscapeNav}>
         <SlotPicker
           account={account}
+          landscape={landscapeNav}
           onBack={() => setPhase("account")}
           onPick={pickSlot}
           onClear={(i) => {
@@ -287,11 +286,12 @@ export function App() {
 
   if (phase === "shop" && accountName && meta.shopUnlocked) {
     return (
-      <MenuShell {...menuProps}>
+      <MenuShell {...menuProps} headerHasLandscape={!!landscapeNav}>
         <ShopScreen
           accountName={accountName}
           slotIndex={slotIndex}
           meta={meta}
+          landscape={landscapeNav}
           highlightArcher={shopGuideLive}
           firstClearGuideStep={shopGuideLive ? guideStep : null}
           onGuideAdvance={advanceGuide}
@@ -319,12 +319,13 @@ export function App() {
 
   if (phase === "select") {
     return (
-      <MenuShell {...menuProps}>
+      <MenuShell {...menuProps} headerHasLandscape={!!landscapeNav}>
         <SelectScreen
           levelId={draft.levelId}
           trackId={draft.trackId}
           weaponId={draft.weaponId}
           meta={meta}
+          landscape={landscapeNav}
           shopPromptPending={meta.shopPromptPending && !archerOwned}
           firstClearGuideStep={guideStep}
           onGuideAdvance={advanceGuide}
@@ -338,6 +339,7 @@ export function App() {
             if (!meta.shopUnlocked) return;
             if (guideStep === "select_shop") advanceGuide();
             primeAudioFromUserGesture();
+            menuBgmRef.current?.unlockFromGesture();
             void menuBgmRef.current?.start("shop");
             setPhase("shop");
           }}
@@ -387,6 +389,7 @@ export function App() {
           if (guideStep === "win_next") advanceGuide();
           refreshAccounts();
           primeAudioFromUserGesture();
+          menuBgmRef.current?.unlockFromGesture();
           void menuBgmRef.current?.start("shop");
           setPhase("shop");
         }}

@@ -157,7 +157,7 @@ function spawnRing(
   return out;
 }
 
-/** 一关按波次推进：四个 Boss 院落到中央中王，节奏更有层次。 */
+/** 一关按波次推进：四院怪物同出，清完后再出中央决战波。 */
 export function createWavePlan(
   nextId: { n: number },
   opts?: { includeFinalBoss?: boolean },
@@ -171,11 +171,11 @@ export function createWavePlan(
     { arenaIndex: 2, minions: 28, withBoss: true, seed: 303 },
     { arenaIndex: 3, minions: 32, withBoss: true, seed: 404 },
   ];
+  const courtyardWave: Enemy[] = [];
   for (const spec of specs) {
     const arena = ARENAS[spec.arenaIndex]!;
-    const enemies: Enemy[] = [];
     if (spec.withBoss) {
-      enemies.push({
+      courtyardWave.push({
         id: nextId.n++,
         kind: "boss",
         x: arena.x,
@@ -185,12 +185,29 @@ export function createWavePlan(
         maxHp: BOSS_HP,
       });
     }
-    spawnRing(nextId, arena.x, arena.y, 2.8, Math.max(3.2, arena.r - 1.4), spec.minions, mulberry32(spec.seed), enemies);
+    spawnRing(
+      nextId,
+      arena.x,
+      arena.y,
+      2.8,
+      Math.max(3.2, arena.r - 1.4),
+      spec.minions,
+      mulberry32(spec.seed),
+      courtyardWave,
+    );
     // 在院落外圈再挂一圈，从院门进场。
-    const outer = spawnRing(nextId, arena.x, arena.y, arena.r + 1.2, arena.r + 2.6, Math.max(3, Math.floor(spec.minions / 3)), mulberry32(spec.seed + 7), enemies);
-    enemies.push(...outer);
-    waves.push(enemies);
+    spawnRing(
+      nextId,
+      arena.x,
+      arena.y,
+      arena.r + 1.2,
+      arena.r + 2.6,
+      Math.max(3, Math.floor(spec.minions / 3)),
+      mulberry32(spec.seed + 7),
+      courtyardWave,
+    );
   }
+  waves.push(courtyardWave);
   if (opts?.includeFinalBoss !== false) {
     // 中央广场：1 王中王 + 2 尸王 + 大群杂兵从外圈压入。
     const finalWave: Enemy[] = [

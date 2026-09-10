@@ -1,11 +1,23 @@
 export function LandscapeModeToggle(props: {
   active: boolean;
   portrait: boolean;
-  variant: "bar" | "overlay" | "chip";
+  variant: "bar" | "overlay" | "chip" | "nav";
   onEnable: () => void;
   onDisable: () => void;
 }) {
   if (!props.portrait && !props.active) return null;
+
+  if (props.variant === "nav") {
+    return (
+      <button
+        type="button"
+        className="ghost nav-btn landscape-nav-btn"
+        onClick={props.active ? props.onDisable : props.onEnable}
+      >
+        {props.active ? "退出横屏" : "横屏"}
+      </button>
+    );
+  }
 
   if (props.variant === "chip") {
     return (
@@ -33,10 +45,10 @@ export function LandscapeModeToggle(props: {
           <div className="landscape-phone" aria-hidden>
             <span />
           </div>
-          <h2>需要横屏操作</h2>
-          <p>点下面按钮开启横屏模式：自动旋转画面并尝试锁定方向（左摇杆 + 右下技能键）。</p>
+          <h2>请开启横屏</h2>
+          <p>战斗需横屏操作。点下方按钮进入全屏横屏（左摇杆 + 右下技能键）。</p>
           <button type="button" className="primary landscape-enable-btn" onClick={props.onEnable}>
-            开启横屏模式
+            进入横屏
           </button>
           <p className="landscape-sub">也可手动旋转手机；已物理横屏则无需点击。</p>
         </div>

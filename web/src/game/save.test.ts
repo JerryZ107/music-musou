@@ -53,6 +53,16 @@ describe("applyRunRewards", () => {
     });
   });
 
+  it("第一关首通自动切到第二关与第二曲", () => {
+    upsertAccount("test");
+    writeSlot("test", 0, newSlotDraft({ levelId: 1, trackId: 1 }));
+    applyRunRewards("test", 0, winResult(1));
+    const slot = readSlot("test", 0)!;
+    expect(slot.levelId).toBe(2);
+    expect(slot.trackId).toBe(2);
+    expect(getSlotMeta("test", 0).shopPromptPending).toBe(true);
+  });
+
   it("第二关首通时重置引导到 reward_track（第一关引导已完成）", () => {
     upsertAccount("test");
     writeSlot("test", 0, newSlotDraft());

@@ -8,6 +8,7 @@ import { TRACK_CODEX } from "../game/codex";
 import type { FirstClearGuideStep } from "../game/onboarding";
 import { guideStepLabel, isFirstClearGuideActive } from "../game/onboarding";
 import { GuideSpotlight } from "./GuideSpotlight";
+import { LandscapeModeToggle } from "./LandscapeModeToggle";
 import {
   GameLogo,
   HeroPortrait,
@@ -18,6 +19,13 @@ import {
 } from "./MenuChrome";
 import { TRACK_VISUAL } from "./menuTheme";
 import { LEVEL_VISUAL } from "../game/levels";
+
+type MenuLandscapeProps = {
+  landscapeForced: boolean;
+  portrait: boolean;
+  onEnableLandscape: () => void;
+  onDisableLandscape: () => void;
+} | null;
 
 export function AccountGate(props: {
   accounts: AccountData[];
@@ -30,7 +38,7 @@ export function AccountGate(props: {
       <GameLogo />
       <MenuPanel className="account-panel">
         <p className="lede">
-          注册即得第一关、Recall 与枪兵。手机竖屏可点「横屏」或出征自动切换；通关解锁新曲、关卡与商城。
+          注册即得第一关、Recall 与枪兵。手机可选横屏浏览选单；出征后可按提示开启战斗横屏。通关解锁新曲、关卡与商城。
         </p>
         <div className="row">
           <input
@@ -66,6 +74,7 @@ export function AccountGate(props: {
 
 export function SlotPicker(props: {
   account: AccountData;
+  landscape?: MenuLandscapeProps;
   onBack: () => void;
   onPick: (index: number, existing: SlotData | null) => void;
   onClear: (index: number) => void;
@@ -76,9 +85,20 @@ export function SlotPicker(props: {
         title={`存档 · ${props.account.name}`}
         subtitle="每个空槽都是独立进度，互不影响"
         actions={
-          <button type="button" className="ghost nav-btn" onClick={props.onBack}>
-            换名号
-          </button>
+          <>
+            {props.landscape && (
+              <LandscapeModeToggle
+                active={props.landscape.landscapeForced}
+                portrait={props.landscape.portrait}
+                variant="nav"
+                onEnable={props.landscape.onEnableLandscape}
+                onDisable={props.landscape.onDisableLandscape}
+              />
+            )}
+            <button type="button" className="ghost nav-btn" onClick={props.onBack}>
+              换名号
+            </button>
+          </>
         }
       />
       <div className="cards">
@@ -139,6 +159,7 @@ export function SelectScreen(props: {
   trackId: TrackId;
   weaponId: WeaponId;
   meta: AccountMeta;
+  landscape?: MenuLandscapeProps;
   shopPromptPending: boolean;
   firstClearGuideStep?: FirstClearGuideStep | null;
   onGuideAdvance?: () => void;
@@ -167,6 +188,15 @@ export function SelectScreen(props: {
         gold={props.meta.gold}
         actions={
           <>
+            {props.landscape && (
+              <LandscapeModeToggle
+                active={props.landscape.landscapeForced}
+                portrait={props.landscape.portrait}
+                variant="nav"
+                onEnable={props.landscape.onEnableLandscape}
+                onDisable={props.landscape.onDisableLandscape}
+              />
+            )}
             <button type="button" className="ghost nav-btn" onClick={props.onOpenCodex}>
               资料片
             </button>
@@ -200,7 +230,6 @@ export function SelectScreen(props: {
           return (
             <button type="button"
               key={id}
-              data-guide={id === 2 ? "select-level-2" : undefined}
               className={["card", id === props.levelId ? "selected" : "", locked ? "locked" : ""]
                 .filter(Boolean)
                 .join(" ")}
@@ -208,7 +237,6 @@ export function SelectScreen(props: {
               onClick={() => {
                 if (locked) return;
                 props.onLevel(id);
-                if (guideStep === "select_level2" && id === 2) props.onGuideComplete?.();
               }}
             >
               <div className="card__banner" style={{ background: vis.grad }} />
@@ -231,7 +259,6 @@ export function SelectScreen(props: {
           return (
             <button type="button"
               key={t.trackId}
-              data-guide={t.trackId === 2 ? "select-track-2" : undefined}
               className={["card", t.trackId === props.trackId ? "selected" : "", locked ? "locked" : ""]
                 .filter(Boolean)
                 .join(" ")}
@@ -239,7 +266,6 @@ export function SelectScreen(props: {
               onClick={() => {
                 if (locked) return;
                 props.onTrack(t.trackId);
-                if (guideStep === "select_track" && t.trackId === 2) props.onGuideAdvance?.();
               }}
             >
               <div className="card__banner" style={{ background: vis.grad }} />
@@ -271,7 +297,6 @@ export function SelectScreen(props: {
               onClick={() => {
                 if (!owned) return;
                 props.onWeapon(hero.id);
-                if (guideStep === "select_archer" && hero.id === 3) props.onGuideAdvance?.();
               }}
             >
               <div
@@ -312,21 +337,6 @@ export function SelectScreen(props: {
         active={guideStep === "select_shop"}
         targetId="select-shop"
         label={guideStepLabel("select_shop")}
-      />
-      <GuideSpotlight
-        active={guideStep === "select_archer"}
-        targetId="select-archer-3"
-        label={guideStepLabel("select_archer")}
-      />
-      <GuideSpotlight
-        active={guideStep === "select_track"}
-        targetId="select-track-2"
-        label={guideStepLabel("select_track")}
-      />
-      <GuideSpotlight
-        active={guideStep === "select_level2"}
-        targetId="select-level-2"
-        label={guideStepLabel("select_level2")}
       />
     </MenuScreen>
   );
